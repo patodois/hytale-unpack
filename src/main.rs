@@ -70,6 +70,15 @@ enum Cmd {
         #[arg(long)]
         scenes: Option<f64>,
     },
+    /// Check what the provider returns against the rewrite-bridge conventions (scale, facing,
+    /// winding, skins, clips ...); try `check-conformance --help`
+    #[command(disable_help_flag = true)]
+    CheckConformance {
+        /// Options of the checker, passed through (`--id`, `--filter`, `--kind`, `--limit`,
+        /// `--strict`, `-v`, `--help`)
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 fn find(assets: &Assets, id: &str, prefixes: &[&str], suffixes: &[&str]) -> Result<String> {
@@ -93,7 +102,9 @@ fn main() -> Result<()> {
     match cli.cmd {
         Cmd::Check => cmd_check(&path),
         #[cfg(not(feature = "bridge"))]
-        Cmd::CheckBridge { .. } => bail!("this command needs the `bridge` feature"),
+        Cmd::CheckBridge { .. } | Cmd::CheckConformance { .. } => {
+            bail!("this command needs the `bridge` feature")
+        }
         Cmd::Anim { path: p, keys } => {
             let assets = Assets::open(&path)?;
             let id = find(
@@ -543,6 +554,10 @@ fn run_bridge(cmd: Cmd, path: &std::path::Path) -> Result<()> {
             Ok(())
         }
         Cmd::CheckBridge { scenes } => cmd_check_bridge(&hy, scenes),
+        Cmd::CheckConformance { args } => {
+            // exits with the checker's status: 0, 1 (an asset failed) or 2 (usage)
+            std::process::exit(rewrite_bridge::conformance::cli::run(&hy, args))
+        }
         Cmd::Anim { .. } | Cmd::Check => unreachable!(),
     }
 }
