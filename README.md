@@ -201,9 +201,10 @@ official documents say, as read on 2026-10-23 (summarised, not legal advice):
   game or any part of it, including its files (3.2, 3.3), nor imply that a mod is official (3.2). Reverse
   engineering and decompiling are barred except as the law permits (4.1), with an interoperability carve-out that
   repeats the law's limits (4.2). "Hytale" may be used descriptively, not as a logo or endorsement (3.6).
-- [Terms of Service v2.2](https://hytale.com/terms-of-service): the same reverse-engineering clause (4.2),
-  a bar on systematically collecting content from the Service (about the online service, not local files), and a
-  statement that mods are governed by the EULA.
+- [Terms of Service v2.2](https://hytale.com/terms-of-service): the same reverse-engineering clause (4.2(a)),
+  a bar on cheats, bots, hacks, exploits "or unauthorized third-party tools" (4.2(b), which does not define
+  "unauthorized"), a bar on systematically collecting content from the Service to build collections (7.2(i), about
+  the online service rather than local files), and a statement that mods are governed by the EULA (7.3).
 - [Community Guidelines v1.0](https://hytale.com/community-guidelines) and
   [Server Operator Policies](https://hytale.com/server-policies): rules for servers and mods (no malware,
   respect others' IP).

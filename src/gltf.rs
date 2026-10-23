@@ -129,7 +129,7 @@ fn hash_bytes(b: &[u8]) -> u64 {
 
 impl Builder {
     fn view(&mut self, bytes: &[u8], target: Option<u32>) -> usize {
-        while self.bin.len() % 4 != 0 {
+        while !self.bin.len().is_multiple_of(4) {
             self.bin.push(0);
         }
         let mut v = json!({"buffer": 0, "byteOffset": self.bin.len(), "byteLength": bytes.len()});
@@ -233,7 +233,7 @@ impl Builder {
         for (file, bytes) in &self.image_files {
             fs::write(out_dir.join(file), bytes)?;
         }
-        while self.bin.len() % 4 != 0 {
+        while !self.bin.len().is_multiple_of(4) {
             self.bin.push(0);
         }
         let bin_name = format!("{name}.bin");
