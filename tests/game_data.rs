@@ -415,3 +415,51 @@ fn a_block_with_a_texture_per_side_exports() {
         3
     );
 }
+
+#[test]
+fn prefab_cells_are_placed_where_the_prefabs_own_entities_stand() {
+    // The prefab's entity positions are in the same frame as its block cells. A mannequin of the
+    // Trork watchtower stands at x = 2.85, z = 1.55 on top of the dirt block of cell (2, 21, 1):
+    // so a cell spans [x, x+1] (under a cell centred on its coordinate, 2.85 would belong to cell
+    // 3, which is empty). The scene is that frame minus the anchor, so the instance of the dirt
+    // block must be under the mannequin: a block model's origin is the bottom centre of the cell,
+    // (x - ax + 0.5, y - ay, z - az + 0.5).
+    let hy = need!();
+    let id = "Server/Prefabs/Npc/Trork/Tier_2/Watchtower/Trork_Tier_2_Watchtower_001.prefab.json";
+    if !hy.assets().contains(id) {
+        return;
+    }
+    let doc: serde_json::Value = serde_json::from_slice(&hy.assets().read(id).unwrap()).unwrap();
+    let entity = doc["entities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["Components"]["Model"]["Model"]["Id"] == "Mannequin")
+        .expect("a mannequin");
+    let p = &entity["Components"]["Transform"]["Position"];
+    let at = [
+        p["X"].as_f64().unwrap(),
+        p["Y"].as_f64().unwrap(),
+        p["Z"].as_f64().unwrap(),
+    ];
+    assert_eq!(at[1].fract(), 0.0, "it stands on a floor");
+    let (scene, report) = hy.load_scene_report(id).unwrap();
+    let anchor = report.anchor.map(f64::from);
+    let cell = [at[0].floor(), at[1] - 1.0, at[2].floor()];
+    let want = [
+        cell[0] - anchor[0] + 0.5,
+        cell[1] - anchor[1],
+        cell[2] - anchor[2] + 0.5,
+    ];
+    let under = scene
+        .instances
+        .iter()
+        .find(|i| (0..3).all(|k| (f64::from(i.transform.translation[k]) - want[k]).abs() < 1e-4));
+    let under = under.expect("an instance for the block under the mannequin");
+    // The mannequin is over that block's footprint (x and z within half a cell of its middle) and
+    // on its top face, in the scene's frame
+    let t = under.transform.translation;
+    let here = [at[0] - anchor[0], at[1] - anchor[1], at[2] - anchor[2]];
+    assert!((here[0] - f64::from(t[0])).abs() < 0.5 && (here[2] - f64::from(t[2])).abs() < 0.5);
+    assert!((here[1] - f64::from(t[1]) - 1.0).abs() < 1e-4);
+}

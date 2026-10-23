@@ -474,5 +474,7 @@ mod tests {
     #[test]
     fn stems_drop_directory_and_extension() {
         assert_eq!(stem("Server/Models/Human/Player.json"), "Player");
+        // Only the extension goes: a dot inside the name stays
+        assert_eq!(stem("Server/Models/Kind.Variant.json"), "Kind.Variant");
     }
 }

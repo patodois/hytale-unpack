@@ -540,6 +540,9 @@ fn run_bridge(cmd: Cmd, path: &std::path::Path) -> Result<()> {
                     report.missing_nodes.join(", ")
                 );
             }
+            for (_, why) in &report.skipped_clips {
+                println!("  clip skipped: {why}");
+            }
             if !report.attachments_not_composed.is_empty() {
                 println!(
                     "  default attachments not composed: {}",
@@ -547,14 +550,7 @@ fn run_bridge(cmd: Cmd, path: &std::path::Path) -> Result<()> {
                 );
             }
             if let Some(dir) = out {
-                let name = id
-                    .rsplit('/')
-                    .next()
-                    .unwrap()
-                    .split('.')
-                    .next()
-                    .unwrap()
-                    .to_string();
+                let name = hytale_unpack::bridge::stem(&id).to_string();
                 let gltf_path = gltf::write_animated(&am, &name, &dir)?;
                 println!("  wrote {}", gltf_path.display());
             }

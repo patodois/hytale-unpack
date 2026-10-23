@@ -35,9 +35,11 @@
 //! per side, each side showing the whole texture. [`Hytale::load_scene_report`] places one
 //! instance per non-empty cell:
 //!
-//! - cell `(x, y, z)` occupies `[x, x+1] x [y, y+1] x [z, z+1]` and is moved by minus the prefab's
-//!   anchor, then by half a cell in x and z so the anchor cell is centred on the origin with its
-//!   floor at y = 0;
+//! - cell `(x, y, z)` occupies `[x, x+1] x [y, y+1] x [z, z+1]` (the prefabs' own entities stand
+//!   on the blocks under that rule, see the README) and is moved by minus the prefab's anchor, so
+//!   the anchor cell is `[0, 1]` in x, y and z: its floor is at y = 0 and the origin is its
+//!   lowest corner. A block model's origin is the bottom centre of its cell, so an unrotated
+//!   block goes to `(x - ax + 0.5, y - ay, z - az + 0.5)`;
 //! - `rotation` turns the block about its cell's centre, see [`crate::prefab::decode_rotation`];
 //! - cells with a `filler` do not draw (they belong to a bigger block), `Empty` cells do not draw,
 //!   and names that match no block are counted in the report and skipped;
@@ -98,6 +100,9 @@ pub struct LoadReport {
     /// Distinct clip node names the model lacks
     pub missing_nodes: Vec<String>,
     pub attachments_not_composed: Vec<String>,
+    /// Clips that were left out because the bridge would not accept them (a negative key time,
+    /// for one), as `(name, why)`. The model itself still loads.
+    pub skipped_clips: Vec<(String, String)>,
 }
 
 fn kind_of_model(path: &str) -> AssetKind {
@@ -115,9 +120,13 @@ fn kind_of_model(path: &str) -> AssetKind {
     }
 }
 
-fn stem(path: &str) -> &str {
+/// The file name without its last extension: `Rock_Stone.json` is `Rock_Stone`,
+/// `Houses_001.prefab.json` is `Houses_001.prefab`, and a name with dots of its own
+/// (`Bush_Plants.Bush.Dead_001.prefab.json`) keeps them, so that two such files do not both
+/// become `Bush_Plants`.
+pub fn stem(path: &str) -> &str {
     let f = path.rsplit('/').next().unwrap_or(path);
-    f.split('.').next().unwrap_or(f)
+    f.rsplit_once('.').map_or(f, |(stem, _)| stem)
 }
 
 /// The clip names of one animation set: the set's name when it has one clip, else
@@ -405,14 +414,7 @@ impl Hytale {
                 Err(_) => return,
             },
         };
-        let (clip, r) = build_clip(rig, &anim, &name);
-        report.dropped_visible_keys += r.dropped_visible_keys;
-        report.dropped_uv_keys += r.dropped_uv_keys;
-        report.missing_nodes.extend(r.missing_nodes);
-        report.missing_nodes.sort();
-        report.missing_nodes.dedup();
-        report.clips += 1;
-        am.animations.push(clip);
+        push_clip(rig, am, report, &anim, name);
     }
 
     fn add_def_clips(
@@ -574,9 +576,14 @@ impl Hytale {
             instances: Vec<Instance>,
             report: SceneReport,
             anchor: [i32; 3],
+            /// The first block that could not be placed; no scene is returned then
+            error: Option<anyhow::Error>,
         }
         impl Collector<'_> {
             fn place(&mut self, b: &PrefabBlock) {
+                if self.error.is_some() {
+                    return;
+                }
                 self.report.blocks += 1;
                 if b.name == "Empty" {
                     self.report.empty += 1;
@@ -604,11 +611,13 @@ impl Hytale {
                     *self.report.unresolved.entry(b.name.clone()).or_default() += 1;
                     return;
                 };
-                self.report.placed += 1;
-                self.instances.push(Instance::new(
-                    model,
-                    block_transform([b.x, b.y, b.z], self.anchor, b.rotation.unwrap_or(0)),
-                ));
+                match block_transform([b.x, b.y, b.z], self.anchor, b.rotation.unwrap_or(0)) {
+                    Ok(t) => {
+                        self.report.placed += 1;
+                        self.instances.push(Instance::new(model, t));
+                    }
+                    Err(e) => self.error = Some(e),
+                }
             }
         }
         impl Visit for Collector<'_> {
@@ -632,8 +641,12 @@ impl Hytale {
                 ..SceneReport::default()
             },
             anchor,
+            error: None,
         };
         let (_, counts) = prefab::stream(&bytes[..], &mut c)?;
+        if let Some(e) = c.error {
+            return Err(e.context(id.to_string()));
+        }
         c.report.fluids = counts.fluids;
         c.report.entities = counts.entities;
         let scene = Scene {
@@ -645,6 +658,30 @@ impl Hytale {
         scene.validate()?;
         Ok((scene, c.report))
     }
+}
+
+/// Converts a clip for the rig and adds it to the model, unless the bridge would reject it. One
+/// bad clip (a key at a negative time, say) must not fail a model that holds hundreds of good
+/// ones: it is left out and named in the report.
+fn push_clip(
+    rig: &Rig,
+    am: &mut AnimatedModel,
+    report: &mut LoadReport,
+    anim: &BlockyAnim,
+    name: String,
+) {
+    let (clip, r) = build_clip(rig, anim, &name);
+    if let Err(e) = clip.validate(am.model.nodes.len()) {
+        report.skipped_clips.push((name, e.to_string()));
+        return;
+    }
+    report.dropped_visible_keys += r.dropped_visible_keys;
+    report.dropped_uv_keys += r.dropped_uv_keys;
+    report.missing_nodes.extend(r.missing_nodes);
+    report.missing_nodes.sort();
+    report.missing_nodes.dedup();
+    report.clips += 1;
+    am.animations.push(clip);
 }
 
 fn append_model(into: &mut Model, from: &Model) {
@@ -690,21 +727,26 @@ pub fn block_rotation(rotation: u32) -> [f32; 4] {
     ))
 }
 
-/// Where a block model (origin at the bottom centre of its cell) goes for a prefab cell.
-pub fn block_transform(cell: [i32; 3], anchor: [i32; 3], rotation: u32) -> Transform {
+/// Where a block model (origin at the bottom centre of its cell) goes for a prefab cell: the
+/// cell `[x, x+1]` moved by minus the anchor, the model origin at the middle of its floor. An
+/// error when a coordinate minus the anchor does not fit 32 bits (the file's numbers are not
+/// trusted to be small).
+pub fn block_transform(cell: [i32; 3], anchor: [i32; 3], rotation: u32) -> Result<Transform> {
     let q = block_rotation(rotation);
-    let centre = [
-        (cell[0] - anchor[0]) as f32 + 0.5,
-        (cell[1] - anchor[1]) as f32 + 0.5,
-        (cell[2] - anchor[2]) as f32 + 0.5,
-    ];
+    let mut centre = [0.0f32; 3];
+    for k in 0..3 {
+        let d = cell[k].checked_sub(anchor[k]).ok_or_else(|| {
+            anyhow!("block at {cell:?} is too far from the anchor {anchor:?} to be placed")
+        })?;
+        centre[k] = d as f32 + 0.5;
+    }
     // rotate about the cell centre: the model origin sits half a cell below it
     let off = rotate(q, [0.0, -0.5, 0.0]);
-    Transform {
+    Ok(Transform {
         translation: [centre[0] + off[0], centre[1] + off[1], centre[2] + off[2]],
         rotation: q,
         scale: [1.0; 3],
-    }
+    })
 }
 
 impl Provider for Hytale {
@@ -760,6 +802,7 @@ impl Provider for Hytale {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blockymodel::BlockyModel;
 
     fn r(path: &str, speed: Option<f32>) -> AnimRef {
         AnimRef {
@@ -819,20 +862,113 @@ mod tests {
 
     #[test]
     fn unrotated_blocks_sit_on_their_cell() {
-        let t = block_transform([3, 5, -2], [3, 5, -2], 0);
+        let t = block_transform([3, 5, -2], [3, 5, -2], 0).unwrap();
         assert_eq!(t.translation, [0.5, 0.0, 0.5]);
         assert_eq!(t.rotation, [0.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn a_cell_is_moved_by_minus_the_anchor_into_x_to_x_plus_one() {
+        // The anchor cell is [0, 1] in x, y and z, so its block model (origin at the bottom
+        // centre) is at (0.5, 0, 0.5); one cell on, one metre on
+        let t = block_transform([-7, 40, 9], [-7, 40, 9], 0).unwrap();
+        assert_eq!(t.translation, [0.5, 0.0, 0.5]);
+        let t = block_transform([-6, 42, 7], [-7, 40, 9], 0).unwrap();
+        assert_eq!(t.translation, [1.5, 2.0, -1.5]);
+    }
+
+    #[test]
+    fn a_cell_too_far_from_the_anchor_is_an_error() {
+        // i32::MAX - (-1) does not fit: a panic in debug builds, a wrong block in release ones
+        let e = block_transform([i32::MAX, 0, 0], [-1, 0, 0], 0).unwrap_err();
+        assert!(e.to_string().contains("too far"), "{e}");
+        assert!(block_transform([0, i32::MIN, 0], [0, 1, 0], 0).is_err());
+        assert!(block_transform([0, 0, -2], [0, 0, i32::MAX], 0).is_err());
+    }
+
+    #[test]
+    fn stem_cuts_at_the_last_dot() {
+        assert_eq!(stem("Server/Item/Items/Rock_Stone.json"), "Rock_Stone");
+        assert_eq!(stem("A/Fly.blockyanim"), "Fly");
+        assert_eq!(stem("noextension"), "noextension");
+        assert_eq!(stem("A/B_001.prefab.json"), "B_001.prefab");
+        // Dots inside the name stay, so these two prefabs do not both become `Bush_Plants`
+        assert_eq!(
+            stem("P/Bush_Plants.Bush.Dead_001.prefab.json"),
+            "Bush_Plants.Bush.Dead_001.prefab"
+        );
+        assert_ne!(
+            stem("P/Bush_Plants.Bush.Dead_001.prefab.json"),
+            stem("P/Bush_Plants.Bush.Dead_002.prefab.json")
+        );
+    }
+
+    fn tiny_rig() -> Rig {
+        let json = r#"{"nodes":[{"id":"1","name":"Root","position":{"x":0,"y":10,"z":0},
+            "orientation":{"x":0,"y":0,"z":0,"w":1},
+            "shape":{"type":"box","offset":{"x":0,"y":5,"z":0},"stretch":{"x":1,"y":1,"z":1},
+                     "settings":{"size":{"x":4,"y":10,"z":4}},
+                     "textureLayout":{"front":{"offset":{"x":0,"y":0},"mirror":{"x":false,"y":false},"angle":0}},
+                     "visible":true,"doubleSided":false}}]}"#;
+        let bm = BlockyModel::parse(json.as_bytes()).unwrap();
+        build_rig(&bm, "m", 1.0 / 64.0, None, "none")
+    }
+
+    fn clip_json(time: i32) -> Vec<u8> {
+        format!(
+            r#"{{"duration":60,"nodeAnimations":{{"Root":{{"position":[
+                 {{"time":{time},"delta":{{"x":0,"y":0,"z":0}}}},
+                 {{"time":30,"delta":{{"x":1,"y":0,"z":0}}}}]}}}}}}"#
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn a_clip_the_bridge_rejects_is_skipped_and_reported_not_fatal() {
+        let rig = tiny_rig();
+        let hy_report = |t: i32| {
+            let anim = BlockyAnim::parse(&clip_json(t)).unwrap();
+            let mut am = AnimatedModel::new(rig.model.clone());
+            let mut report = LoadReport::default();
+            push_clip(&rig, &mut am, &mut report, &anim, format!("Clip{t}"));
+            (am, report)
+        };
+        // The premise: a key at a negative time makes the bridge reject the clip, and with the
+        // clip in the model, the whole model
+        let anim = BlockyAnim::parse(&clip_json(-5)).unwrap();
+        let (clip, _) = build_clip(&rig, &anim, "Bad");
+        assert!(clip.validate(rig.model.nodes.len()).is_err());
+        let mut whole = AnimatedModel::new(rig.model.clone());
+        whole.animations.push(clip);
+        assert!(whole.validate().is_err());
+        // Skipped: the model still validates, and the report names the clip
+        let (am, report) = hy_report(-5);
+        assert!(am.animations.is_empty());
+        assert_eq!(report.skipped_clips.len(), 1);
+        assert!(
+            report.skipped_clips[0].1.contains("Clip-5"),
+            "{:?}",
+            report.skipped_clips
+        );
+        assert_eq!(report.clips, 0);
+        am.validate().unwrap();
+        // A good clip is added as before
+        let (am, report) = hy_report(0);
+        assert_eq!(am.animations.len(), 1);
+        assert_eq!(report.clips, 1);
+        assert!(report.skipped_clips.is_empty());
+        am.validate().unwrap();
     }
 
     #[test]
     fn rotation_is_about_the_cell_centre() {
         // Pitch of two quarter turns flips a block upside down: its origin (bottom centre) ends
         // up at the cell's top
-        let t = block_transform([0, 0, 0], [0, 0, 0], 8);
+        let t = block_transform([0, 0, 0], [0, 0, 0], 8).unwrap();
         assert!((t.translation[1] - 1.0).abs() < 1e-5, "{:?}", t.translation);
         assert!((t.translation[0] - 0.5).abs() < 1e-5);
         // Yaw only keeps the origin at the floor
-        let t = block_transform([0, 0, 0], [0, 0, 0], 1);
+        let t = block_transform([0, 0, 0], [0, 0, 0], 1).unwrap();
         assert!(t.translation[1].abs() < 1e-5);
     }
 
