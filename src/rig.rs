@@ -44,7 +44,11 @@ use crate::blockymodel::{shape_faces, BlockyModel, FACE_TRIANGLES, V3};
 use crate::image::Rgba;
 
 pub fn to_image(img: &Rgba) -> Image {
-    Image { width: img.width, height: img.height, rgba: img.data.clone() }
+    Image {
+        width: img.width,
+        height: img.height,
+        rgba: img.data.clone(),
+    }
 }
 
 /// A Hytale node's place in the bridge model
@@ -87,8 +91,17 @@ pub fn qnorm(q: [f32; 4]) -> [f32; 4] {
 
 /// Builds the bridge model for a blocky model. `scale` is metres per pixel. `texture` is the
 /// image every shape is drawn with, if one could be found.
-pub fn build_rig(bm: &BlockyModel, name: &str, scale: f32, texture: Option<&Rgba>, material_name: &str) -> Rig {
-    let mut model = Model { name: name.to_string(), ..Model::default() };
+pub fn build_rig(
+    bm: &BlockyModel,
+    name: &str,
+    scale: f32,
+    texture: Option<&Rgba>,
+    material_name: &str,
+) -> Rig {
+    let mut model = Model {
+        name: name.to_string(),
+        ..Model::default()
+    };
     let mut by_name: HashMap<String, Vec<RigNode>> = HashMap::new();
     let mut variants: HashMap<(bool, bool), usize> = HashMap::new();
     let tex_alpha = texture.is_some_and(|t| t.has_alpha());
@@ -105,7 +118,11 @@ pub fn build_rig(bm: &BlockyModel, name: &str, scale: f32, texture: Option<&Rgba
 
     fn walk(c: &mut Ctx, n: &crate::blockymodel::Node, parent: Option<usize>, parent_offset: V3) {
         let s = c.scale;
-        let rest_pos = [n.position.x + parent_offset.x, n.position.y + parent_offset.y, n.position.z + parent_offset.z];
+        let rest_pos = [
+            n.position.x + parent_offset.x,
+            n.position.y + parent_offset.y,
+            n.position.z + parent_offset.z,
+        ];
         let rest_rot = qnorm(n.orientation.arr());
         let pivot = c.model.nodes.len();
         let mut node = Node::new(n.name.clone(), parent);
@@ -114,7 +131,11 @@ pub fn build_rig(bm: &BlockyModel, name: &str, scale: f32, texture: Option<&Rgba
         c.model.nodes.push(node);
 
         let sh = &n.shape;
-        let faces = if sh.visible { shape_faces(sh) } else { Vec::new() };
+        let faces = if sh.visible {
+            shape_faces(sh)
+        } else {
+            Vec::new()
+        };
         let mut shape = None;
         if !faces.is_empty() {
             let mut sn = Node::new(format!("{}/shape", n.name), Some(pivot));
@@ -128,7 +149,12 @@ pub fn build_rig(bm: &BlockyModel, name: &str, scale: f32, texture: Option<&Rgba
             let key = (sh.double_sided, transparent);
             let material = *c.variants.entry(key).or_insert_with(|| {
                 let mut m = Material {
-                    name: format!("{}{}{}", c.material_name, if key.0 { " (double sided)" } else { "" }, if key.1 { " (transparent)" } else { "" }),
+                    name: format!(
+                        "{}{}{}",
+                        c.material_name,
+                        if key.0 { " (double sided)" } else { "" },
+                        if key.1 { " (transparent)" } else { "" }
+                    ),
                     base_color: c.texture.map(to_image),
                     metallic: 0.0,
                     roughness: 1.0,
@@ -145,14 +171,22 @@ pub fn build_rig(bm: &BlockyModel, name: &str, scale: f32, texture: Option<&Rgba
                 c.model.materials.push(m);
                 c.model.materials.len() - 1
             });
-            let mut mesh = Mesh { name: n.name.clone(), node: shape_idx, material, ..Mesh::default() };
+            let mut mesh = Mesh {
+                name: n.name.clone(),
+                node: shape_idx,
+                material,
+                ..Mesh::default()
+            };
             for f in &faces {
                 let base = mesh.positions.len() as u32;
                 for i in 0..4 {
                     mesh.positions.push(f.positions[i].map(|v| v * s));
                     mesh.normals.push(f.normal);
                     if let Some(t) = c.texture {
-                        mesh.uvs.push([f.uv_px[i][0] / t.width as f32, f.uv_px[i][1] / t.height as f32]);
+                        mesh.uvs.push([
+                            f.uv_px[i][0] / t.width as f32,
+                            f.uv_px[i][1] / t.height as f32,
+                        ]);
                     }
                 }
                 for tri in FACE_TRIANGLES {
@@ -161,17 +195,34 @@ pub fn build_rig(bm: &BlockyModel, name: &str, scale: f32, texture: Option<&Rgba
             }
             c.model.meshes.push(mesh);
         }
-        c.by_name.entry(n.name.clone()).or_default().push(RigNode { pivot, rest_pos, rest_rot, shape });
+        c.by_name.entry(n.name.clone()).or_default().push(RigNode {
+            pivot,
+            rest_pos,
+            rest_rot,
+            shape,
+        });
         for ch in &n.children {
             walk(c, ch, Some(pivot), sh.offset);
         }
     }
 
-    let mut ctx = Ctx { model: &mut model, by_name: &mut by_name, variants: &mut variants, texture, tex_alpha, scale, material_name };
+    let mut ctx = Ctx {
+        model: &mut model,
+        by_name: &mut by_name,
+        variants: &mut variants,
+        texture,
+        tex_alpha,
+        scale,
+        material_name,
+    };
     for n in &bm.nodes {
         walk(&mut ctx, n, None, V3::ZERO);
     }
-    Rig { model, by_name, scale }
+    Rig {
+        model,
+        by_name,
+        scale,
+    }
 }
 
 /// What a clip conversion did not carry over
@@ -213,7 +264,13 @@ fn vec3_channel(node: usize, target: Target, tr: Vec<Track>) -> Option<Channel> 
     let times: Vec<f32> = tr.iter().map(|k| k.t).collect();
     if !any_smooth {
         let values = tr.iter().flat_map(|k| k.v.iter().copied()).collect();
-        return Some(Channel::new(node, target, Interpolation::Linear, times, values));
+        return Some(Channel::new(
+            node,
+            target,
+            Interpolation::Linear,
+            times,
+            values,
+        ));
     }
     // Hermite tangents per segment; glTF stores them as value per second, scaled by the segment
     // length inside the curve. A smooth segment k uses Catmull-Rom tangents (p[k+1]-p[k-1])/2 and
@@ -249,7 +306,13 @@ fn vec3_channel(node: usize, target: Target, tr: Vec<Track>) -> Option<Channel> 
         values.extend_from_slice(&tr[k].v);
         values.extend_from_slice(&b);
     }
-    Some(Channel::new(node, target, Interpolation::CubicSpline, times, values))
+    Some(Channel::new(
+        node,
+        target,
+        Interpolation::CubicSpline,
+        times,
+        values,
+    ))
 }
 
 fn rotation_channel(node: usize, tr: Vec<Track>) -> Option<Channel> {
@@ -271,7 +334,13 @@ fn rotation_channel(node: usize, tr: Vec<Track>) -> Option<Channel> {
         }
         values.extend_from_slice(&q);
     }
-    Some(Channel::new(node, Target::Rotation, Interpolation::Linear, times, values))
+    Some(Channel::new(
+        node,
+        Target::Rotation,
+        Interpolation::Linear,
+        times,
+        values,
+    ))
 }
 
 fn smooth_of<T>(k: &Key<T>) -> bool {
@@ -298,7 +367,11 @@ pub fn build_clip(rig: &Rig, anim: &BlockyAnim, name: &str) -> (Animation, ClipR
                     .iter()
                     .map(|k| Track {
                         t: k.time / FPS,
-                        v: vec![(rn.rest_pos[0] + k.delta.x) * s, (rn.rest_pos[1] + k.delta.y) * s, (rn.rest_pos[2] + k.delta.z) * s],
+                        v: vec![
+                            (rn.rest_pos[0] + k.delta.x) * s,
+                            (rn.rest_pos[1] + k.delta.y) * s,
+                            (rn.rest_pos[2] + k.delta.z) * s,
+                        ],
                         smooth: smooth_of(k),
                     })
                     .collect();
@@ -308,7 +381,11 @@ pub fn build_clip(rig: &Rig, anim: &BlockyAnim, name: &str) -> (Animation, ClipR
                 let tr = na
                     .orientation
                     .iter()
-                    .map(|k| Track { t: k.time / FPS, v: qnorm(qmul(rn.rest_rot, qnorm(k.delta.arr()))).to_vec(), smooth: smooth_of(k) })
+                    .map(|k| Track {
+                        t: k.time / FPS,
+                        v: qnorm(qmul(rn.rest_rot, qnorm(k.delta.arr()))).to_vec(),
+                        smooth: smooth_of(k),
+                    })
                     .collect();
                 channels.extend(rotation_channel(rn.pivot, tr));
             }
@@ -318,7 +395,11 @@ pub fn build_clip(rig: &Rig, anim: &BlockyAnim, name: &str) -> (Animation, ClipR
                     .iter()
                     .map(|k| Track {
                         t: k.time / FPS,
-                        v: vec![stretch[0] * k.delta.x, stretch[1] * k.delta.y, stretch[2] * k.delta.z],
+                        v: vec![
+                            stretch[0] * k.delta.x,
+                            stretch[1] * k.delta.y,
+                            stretch[2] * k.delta.z,
+                        ],
                         smooth: smooth_of(k),
                     })
                     .collect();
@@ -333,7 +414,14 @@ pub fn build_clip(rig: &Rig, anim: &BlockyAnim, name: &str) -> (Animation, ClipR
     }
     report.missing_nodes.sort();
     report.missing_nodes.dedup();
-    (Animation { name: name.to_string(), duration_s: longest, channels }, report)
+    (
+        Animation {
+            name: name.to_string(),
+            duration_s: longest,
+            channels,
+        },
+        report,
+    )
 }
 
 #[cfg(test)]
@@ -352,7 +440,11 @@ mod tests {
 
     fn rig() -> Rig {
         let bm = BlockyModel::parse(MODEL.as_bytes()).unwrap();
-        let tex = Rgba { width: 32, height: 32, data: vec![255; 32 * 32 * 4] };
+        let tex = Rgba {
+            width: 32,
+            height: 32,
+            data: vec![255; 32 * 32 * 4],
+        };
         build_rig(&bm, "m", 1.0 / 64.0, Some(&tex), "tex")
     }
 
@@ -392,16 +484,36 @@ mod tests {
         assert_eq!(report.missing_nodes, ["Ghost"]);
         assert_eq!(clip.duration_s, 1.0);
         clip.validate(r.model.nodes.len()).unwrap();
-        let pos = clip.channels.iter().find(|c| c.target == Target::Translation).unwrap();
+        let pos = clip
+            .channels
+            .iter()
+            .find(|c| c.target == Target::Translation)
+            .unwrap();
         assert_eq!(pos.interpolation, Interpolation::Linear);
         assert_eq!(pos.times, [0.0, 1.0]);
-        assert_eq!(pos.values, [0.0, 10.0 / 64.0, 0.0, 6.0 / 64.0, 10.0 / 64.0, 0.0]);
+        assert_eq!(
+            pos.values,
+            [0.0, 10.0 / 64.0, 0.0, 6.0 / 64.0, 10.0 / 64.0, 0.0]
+        );
     }
 
     #[test]
     fn smooth_positions_become_cubic_with_catmull_rom_tangents() {
-        let tr = |v: [f32; 3], t: f32| Track { t, v: v.to_vec(), smooth: true };
-        let ch = vec3_channel(0, Target::Translation, vec![tr([0.0; 3], 0.0), tr([1.0, 0.0, 0.0], 1.0), tr([4.0, 0.0, 0.0], 2.0)]).unwrap();
+        let tr = |v: [f32; 3], t: f32| Track {
+            t,
+            v: v.to_vec(),
+            smooth: true,
+        };
+        let ch = vec3_channel(
+            0,
+            Target::Translation,
+            vec![
+                tr([0.0; 3], 0.0),
+                tr([1.0, 0.0, 0.0], 1.0),
+                tr([4.0, 0.0, 0.0], 2.0),
+            ],
+        )
+        .unwrap();
         assert_eq!(ch.interpolation, Interpolation::CubicSpline);
         assert_eq!(ch.values.len(), 27);
         // key 1: in = out = (p2 - p0) / 2 per unit time = 2
@@ -413,8 +525,19 @@ mod tests {
 
     #[test]
     fn rotations_stay_in_one_hemisphere() {
-        let tr = |q: [f32; 4], t: f32| Track { t, v: q.to_vec(), smooth: false };
-        let ch = rotation_channel(0, vec![tr([0.0, 0.0, 0.0, 1.0], 0.0), tr([0.0, 0.0, 0.0, -1.0], 1.0)]).unwrap();
+        let tr = |q: [f32; 4], t: f32| Track {
+            t,
+            v: q.to_vec(),
+            smooth: false,
+        };
+        let ch = rotation_channel(
+            0,
+            vec![
+                tr([0.0, 0.0, 0.0, 1.0], 0.0),
+                tr([0.0, 0.0, 0.0, -1.0], 1.0),
+            ],
+        )
+        .unwrap();
         assert_eq!(&ch.values[4..], [0.0, 0.0, 0.0, 1.0]);
     }
 }

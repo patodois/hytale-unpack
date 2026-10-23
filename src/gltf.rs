@@ -17,7 +17,9 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
-use rewrite_bridge::{AlphaMode, AnimatedModel, Interpolation, Model, Scene, SceneModel, Target, Transform};
+use rewrite_bridge::{
+    AlphaMode, AnimatedModel, Interpolation, Model, Scene, SceneModel, Target, Transform,
+};
 use serde_json::{json, Value};
 
 use crate::image::encode_png;
@@ -25,7 +27,9 @@ use crate::image::encode_png;
 pub type Mat4 = [f32; 16]; // column-major
 
 pub fn mat_identity() -> Mat4 {
-    [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+    [
+        1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+    ]
 }
 
 pub fn mat_mul(a: &Mat4, b: &Mat4) -> Mat4 {
@@ -41,7 +45,17 @@ pub fn mat_mul(a: &Mat4, b: &Mat4) -> Mat4 {
 /// `T * R * S`
 pub fn mat_from_trs(t: [f32; 3], q: [f32; 4], s: [f32; 3]) -> Mat4 {
     let [x, y, z, w] = q;
-    let (xx, yy, zz, xy, xz, yz, wx, wy, wz) = (x * x, y * y, z * z, x * y, x * z, y * z, w * x, w * y, w * z);
+    let (xx, yy, zz, xy, xz, yz, wx, wy, wz) = (
+        x * x,
+        y * y,
+        z * z,
+        x * y,
+        x * z,
+        y * z,
+        w * x,
+        w * y,
+        w * z,
+    );
     let r = [
         [1.0 - 2.0 * (yy + zz), 2.0 * (xy + wz), 2.0 * (xz - wy)],
         [2.0 * (xy - wz), 1.0 - 2.0 * (xx + zz), 2.0 * (yz + wx)],
@@ -65,26 +79,56 @@ pub fn mat_to_trs(m: &Mat4) -> ([f32; 3], [f32; 4], [f32; 3]) {
     let len = |v: [f32; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
     let (c0, c1, c2) = (col(0), col(1), col(2));
     let mut s = [len(c0), len(c1), len(c2)];
-    let cross = [c0[1] * c1[2] - c0[2] * c1[1], c0[2] * c1[0] - c0[0] * c1[2], c0[0] * c1[1] - c0[1] * c1[0]];
+    let cross = [
+        c0[1] * c1[2] - c0[2] * c1[1],
+        c0[2] * c1[0] - c0[0] * c1[2],
+        c0[0] * c1[1] - c0[1] * c1[0],
+    ];
     if cross[0] * c2[0] + cross[1] * c2[1] + cross[2] * c2[2] < 0.0 {
         s[0] = -s[0];
     }
-    let n = |v: [f32; 3], d: f32| if d == 0.0 { [0.0; 3] } else { [v[0] / d, v[1] / d, v[2] / d] };
+    let n = |v: [f32; 3], d: f32| {
+        if d == 0.0 {
+            [0.0; 3]
+        } else {
+            [v[0] / d, v[1] / d, v[2] / d]
+        }
+    };
     let (r0, r1, r2) = (n(c0, s[0]), n(c1, s[1]), n(c2, s[2]));
     // rotation matrix with columns r0, r1, r2 to quaternion
     let tr = r0[0] + r1[1] + r2[2];
     let q = if tr > 0.0 {
         let k = (tr + 1.0).sqrt() * 2.0;
-        [(r1[2] - r2[1]) / k, (r2[0] - r0[2]) / k, (r0[1] - r1[0]) / k, 0.25 * k]
+        [
+            (r1[2] - r2[1]) / k,
+            (r2[0] - r0[2]) / k,
+            (r0[1] - r1[0]) / k,
+            0.25 * k,
+        ]
     } else if r0[0] > r1[1] && r0[0] > r2[2] {
         let k = (1.0 + r0[0] - r1[1] - r2[2]).sqrt() * 2.0;
-        [0.25 * k, (r1[0] + r0[1]) / k, (r2[0] + r0[2]) / k, (r1[2] - r2[1]) / k]
+        [
+            0.25 * k,
+            (r1[0] + r0[1]) / k,
+            (r2[0] + r0[2]) / k,
+            (r1[2] - r2[1]) / k,
+        ]
     } else if r1[1] > r2[2] {
         let k = (1.0 + r1[1] - r0[0] - r2[2]).sqrt() * 2.0;
-        [(r1[0] + r0[1]) / k, 0.25 * k, (r2[1] + r1[2]) / k, (r2[0] - r0[2]) / k]
+        [
+            (r1[0] + r0[1]) / k,
+            0.25 * k,
+            (r2[1] + r1[2]) / k,
+            (r2[0] - r0[2]) / k,
+        ]
     } else {
         let k = (1.0 + r2[2] - r0[0] - r1[1]).sqrt() * 2.0;
-        [(r2[0] + r0[2]) / k, (r2[1] + r1[2]) / k, 0.25 * k, (r0[1] - r1[0]) / k]
+        [
+            (r2[0] + r0[2]) / k,
+            (r2[1] + r1[2]) / k,
+            0.25 * k,
+            (r0[1] - r1[0]) / k,
+        ]
     };
     ([m[12], m[13], m[14]], crate::rig::qnorm(q), s)
 }
@@ -141,9 +185,18 @@ impl Builder {
         self.views.len() - 1
     }
 
-    fn accessor(&mut self, bytes: &[u8], target: Option<u32>, component: u32, count: usize, ty: &str, minmax: Option<([f32; 3], [f32; 3])>) -> usize {
+    fn accessor(
+        &mut self,
+        bytes: &[u8],
+        target: Option<u32>,
+        component: u32,
+        count: usize,
+        ty: &str,
+        minmax: Option<([f32; 3], [f32; 3])>,
+    ) -> usize {
         let view = self.view(bytes, target);
-        let mut a = json!({"bufferView": view, "componentType": component, "count": count, "type": ty});
+        let mut a =
+            json!({"bufferView": view, "componentType": component, "count": count, "type": ty});
         if let Some((lo, hi)) = minmax {
             a["min"] = json!(lo);
             a["max"] = json!(hi);
@@ -164,9 +217,11 @@ impl Builder {
         }
         let n = self.image_files.len();
         let file = format!("{stem}_{n}.png");
-        self.image_files.push((file.clone(), encode_png(img.width, img.height, &img.rgba)?));
+        self.image_files
+            .push((file.clone(), encode_png(img.width, img.height, &img.rgba)?));
         self.images.push(json!({"uri": file}));
-        self.textures.push(json!({"sampler": 0, "source": self.images.len() - 1}));
+        self.textures
+            .push(json!({"sampler": 0, "source": self.images.len() - 1}));
         let tex = self.textures.len() - 1;
         self.image_ids.insert(key, tex);
         Ok(tex)
@@ -181,7 +236,8 @@ impl Builder {
                 let tex = self.image(stem, img)?;
                 pbr["baseColorTexture"] = json!({"index": tex});
             }
-            let mut mat = json!({"name": m.name, "pbrMetallicRoughness": pbr, "doubleSided": m.double_sided});
+            let mut mat =
+                json!({"name": m.name, "pbrMetallicRoughness": pbr, "doubleSided": m.double_sided});
             match m.alpha {
                 AlphaMode::Opaque => {}
                 AlphaMode::Mask(c) => {
@@ -218,10 +274,18 @@ impl Builder {
             if !mesh.uvs.is_empty() {
                 let flat: Vec<f32> = mesh.uvs.iter().flatten().copied().collect();
                 let bytes: Vec<u8> = flat.iter().flat_map(|f| f.to_le_bytes()).collect();
-                attrs["TEXCOORD_0"] = json!(self.accessor(&bytes, Some(34962), 5126, n, "VEC2", None));
+                attrs["TEXCOORD_0"] =
+                    json!(self.accessor(&bytes, Some(34962), 5126, n, "VEC2", None));
             }
             let bytes: Vec<u8> = mesh.indices.iter().flat_map(|i| i.to_le_bytes()).collect();
-            let idx = self.accessor(&bytes, Some(34963), 5125, mesh.indices.len(), "SCALAR", None);
+            let idx = self.accessor(
+                &bytes,
+                Some(34963),
+                5125,
+                mesh.indices.len(),
+                "SCALAR",
+                None,
+            );
             self.meshes.push(json!({"name": mesh.name, "primitives": [{"attributes": attrs, "indices": idx, "material": mats[mesh.material], "mode": 4}]}));
             meshes.push(self.meshes.len() - 1);
         }
@@ -260,7 +324,10 @@ impl Builder {
         put("animations", self.animations);
         if !self.image_files.is_empty() {
             // 9728 NEAREST, 33071 CLAMP_TO_EDGE
-            obj.insert("samplers".into(), json!([{"magFilter": 9728, "minFilter": 9728, "wrapS": 33071, "wrapT": 33071}]));
+            obj.insert(
+                "samplers".into(),
+                json!([{"magFilter": 9728, "minFilter": 9728, "wrapS": 33071, "wrapT": 33071}]),
+            );
         }
         let path = out_dir.join(format!("{name}.gltf"));
         fs::write(&path, serde_json::to_vec_pretty(&doc)?)?;
@@ -304,7 +371,9 @@ pub fn write_animated(am: &AnimatedModel, name: &str, out_dir: &Path) -> Result<
     }
     for (mi, mesh) in model.meshes.iter().enumerate() {
         b.nodes[mesh.node]["mesh"] = json!(meshes[mi]);
-        if b.nodes[mesh.node].get("mesh").is_some() && model.meshes.iter().filter(|m| m.node == mesh.node).count() > 1 {
+        if b.nodes[mesh.node].get("mesh").is_some()
+            && model.meshes.iter().filter(|m| m.node == mesh.node).count() > 1
+        {
             bail!("node {} carries more than one mesh", mesh.node);
         }
     }
@@ -322,8 +391,16 @@ pub fn write_animated(am: &AnimatedModel, name: &str, out_dir: &Path) -> Result<
                 a
             };
             let comps = ch.target.components();
-            let per = if ch.interpolation == Interpolation::CubicSpline { 3 } else { 1 };
-            let output = b.floats(&ch.values, ch.times.len() * per, if comps == 4 { "VEC4" } else { "VEC3" });
+            let per = if ch.interpolation == Interpolation::CubicSpline {
+                3
+            } else {
+                1
+            };
+            let output = b.floats(
+                &ch.values,
+                ch.times.len() * per,
+                if comps == 4 { "VEC4" } else { "VEC3" },
+            );
             let interp = match ch.interpolation {
                 Interpolation::Step => "STEP",
                 Interpolation::Linear => "LINEAR",
@@ -336,10 +413,13 @@ pub fn write_animated(am: &AnimatedModel, name: &str, out_dir: &Path) -> Result<
                 Target::Scale => "scale",
                 _ => bail!("unsupported animation target"),
             };
-            channels.push(json!({"sampler": samplers.len() - 1, "target": {"node": ch.node, "path": path}}));
+            channels.push(
+                json!({"sampler": samplers.len() - 1, "target": {"node": ch.node, "path": path}}),
+            );
         }
         if !channels.is_empty() {
-            b.animations.push(json!({"name": clip.name, "samplers": samplers, "channels": channels}));
+            b.animations
+                .push(json!({"name": clip.name, "samplers": samplers, "channels": channels}));
         }
     }
     b.finish(name, out_dir, roots)
@@ -357,7 +437,14 @@ pub fn write_scene(scene: &Scene, name: &str, out_dir: &Path) -> Result<PathBuf>
         };
         let (_, meshes) = b.add_model_data(name, model)?;
         let world = world_matrices(model);
-        per_model.push(model.meshes.iter().enumerate().map(|(i, mesh)| (meshes[i], world[mesh.node])).collect());
+        per_model.push(
+            model
+                .meshes
+                .iter()
+                .enumerate()
+                .map(|(i, mesh)| (meshes[i], world[mesh.node]))
+                .collect(),
+        );
     }
     let mut roots = Vec::new();
     for inst in &scene.instances {

@@ -53,14 +53,17 @@ impl Assets {
         if let Some(p) = std::env::var_os("HYTALE_ASSETS") {
             return PathBuf::from(p);
         }
-        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_default();
         home.join(MAC_INSTALL)
     }
 
     /// Opens the archive and reads its central directory.
     pub fn open(path: &Path) -> Result<Self> {
         let file = File::open(path).with_context(|| format!("opening {}", path.display()))?;
-        let mut zip = ZipArchive::new(file).with_context(|| format!("reading the central directory of {}", path.display()))?;
+        let mut zip = ZipArchive::new(file)
+            .with_context(|| format!("reading the central directory of {}", path.display()))?;
         let n = zip.len();
         let mut names = Vec::with_capacity(n);
         let mut sizes = Vec::with_capacity(n);
@@ -76,7 +79,14 @@ impl Assets {
             }
             names.push(name);
         }
-        Ok(Assets { path: path.to_path_buf(), zip: Mutex::new(zip), names, sizes, index, folded })
+        Ok(Assets {
+            path: path.to_path_buf(),
+            zip: Mutex::new(zip),
+            names,
+            sizes,
+            index,
+            folded,
+        })
     }
 
     pub fn path(&self) -> &Path {
@@ -85,7 +95,11 @@ impl Assets {
 
     /// Every file entry name, in archive order.
     pub fn names(&self) -> impl Iterator<Item = &str> {
-        self.names.iter().enumerate().filter(|(i, n)| self.index.get(*n) == Some(i)).map(|(_, n)| n.as_str())
+        self.names
+            .iter()
+            .enumerate()
+            .filter(|(i, n)| self.index.get(*n) == Some(i))
+            .map(|(_, n)| n.as_str())
     }
 
     /// File entries under a folder prefix such as `"Common/Blocks/"`.
@@ -113,19 +127,25 @@ impl Assets {
     }
 
     fn lookup(&self, name: &str) -> Option<usize> {
-        self.index.get(name).copied().or_else(|| self.folded.get(&name.to_ascii_lowercase()).copied())
+        self.index
+            .get(name)
+            .copied()
+            .or_else(|| self.folded.get(&name.to_ascii_lowercase()).copied())
     }
 
     /// The bytes of one entry.
     pub fn read(&self, name: &str) -> Result<Vec<u8>> {
-        let i = self.lookup(name).ok_or_else(|| anyhow!("{name}: not in Assets.zip"))?;
+        let i = self
+            .lookup(name)
+            .ok_or_else(|| anyhow!("{name}: not in Assets.zip"))?;
         if self.sizes[i] > READ_LIMIT {
             bail!("{name}: {} bytes is too big to read at once", self.sizes[i]);
         }
         let mut zip = self.zip.lock().unwrap();
         let mut f = zip.by_index(i).with_context(|| format!("opening {name}"))?;
         let mut buf = Vec::with_capacity(self.sizes[i] as usize);
-        f.read_to_end(&mut buf).with_context(|| format!("reading {name}"))?;
+        f.read_to_end(&mut buf)
+            .with_context(|| format!("reading {name}"))?;
         Ok(buf)
     }
 
@@ -137,8 +157,14 @@ impl Assets {
 
     /// Runs `f` on a streaming reader of one entry, without buffering the entry. The archive stays
     /// locked while `f` runs, so `f` must not call back into `self`.
-    pub fn with_reader<T>(&self, name: &str, f: impl FnOnce(&mut dyn Read) -> Result<T>) -> Result<T> {
-        let i = self.lookup(name).ok_or_else(|| anyhow!("{name}: not in Assets.zip"))?;
+    pub fn with_reader<T>(
+        &self,
+        name: &str,
+        f: impl FnOnce(&mut dyn Read) -> Result<T>,
+    ) -> Result<T> {
+        let i = self
+            .lookup(name)
+            .ok_or_else(|| anyhow!("{name}: not in Assets.zip"))?;
         let mut zip = self.zip.lock().unwrap();
         let mut file = zip.by_index(i).with_context(|| format!("opening {name}"))?;
         f(&mut file)

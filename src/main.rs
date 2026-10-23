@@ -9,7 +9,11 @@ use hytale_unpack::prefab::{self, PrefabBlock, Visit};
 use hytale_unpack::{check, Assets};
 
 #[derive(Parser)]
-#[command(name = "hytale-unpack", version, about = "Reader for Hytale's Assets.zip (models, animations, prefabs)")]
+#[command(
+    name = "hytale-unpack",
+    version,
+    about = "Reader for Hytale's Assets.zip (models, animations, prefabs)"
+)]
 struct Cli {
     /// Path to Assets.zip (default: $HYTALE_ASSETS, else the macOS launcher's install)
     #[arg(long, global = true)]
@@ -77,7 +81,10 @@ fn find(assets: &Assets, id: &str, prefixes: &[&str], suffixes: &[&str]) -> Resu
             }
         }
     }
-    bail!("{id}: not found in Assets.zip (tried {} prefix and suffix combinations)", prefixes.len() * suffixes.len())
+    bail!(
+        "{id}: not found in Assets.zip (tried {} prefix and suffix combinations)",
+        prefixes.len() * suffixes.len()
+    )
 }
 
 fn main() -> Result<()> {
@@ -89,7 +96,12 @@ fn main() -> Result<()> {
         Cmd::CheckBridge { .. } => bail!("this command needs the `bridge` feature"),
         Cmd::Anim { path: p, keys } => {
             let assets = Assets::open(&path)?;
-            let id = find(&assets, &p, &["", "Common/", "Common/Characters/Animations/"], &["", ".blockyanim"])?;
+            let id = find(
+                &assets,
+                &p,
+                &["", "Common/", "Common/Characters/Animations/"],
+                &["", ".blockyanim"],
+            )?;
             cmd_anim(&assets, &id, keys)
         }
         cmd => {
@@ -108,9 +120,19 @@ fn main() -> Result<()> {
                         }
                         Ok(())
                     }
-                    Cmd::Prefab { path: p, entities, top, .. } => {
+                    Cmd::Prefab {
+                        path: p,
+                        entities,
+                        top,
+                        ..
+                    } => {
                         let assets = Assets::open(&path)?;
-                        let id = find(&assets, &p, &["", "Server/Prefabs/"], &["", ".prefab.json", ".json"])?;
+                        let id = find(
+                            &assets,
+                            &p,
+                            &["", "Server/Prefabs/"],
+                            &["", ".prefab.json", ".json"],
+                        )?;
                         cmd_prefab(&assets, &id, entities, top)
                     }
                     _ => bail!("this command needs the `bridge` feature"),
@@ -123,23 +145,40 @@ fn main() -> Result<()> {
 fn cmd_check(path: &std::path::Path) -> Result<()> {
     let assets = Assets::open(path)?;
     let report = check::run(&assets, |name, done| eprintln!("  {done:>6} {name}"))?;
-    let t = |name: &str, t: &check::Tally| println!("{name:<10} ok {:>6}  failed {:>4}  with notes {:>4}", t.ok, t.failed, t.with_problems);
+    let t = |name: &str, t: &check::Tally| {
+        println!(
+            "{name:<10} ok {:>6}  failed {:>4}  with notes {:>4}",
+            t.ok, t.failed, t.with_problems
+        )
+    };
     t("models", &report.models);
     t("anims", &report.anims);
     t("prefabs", &report.prefabs);
     println!(
         "{} nodes, {} keyframes, {} blocks ({} filler cells), {} fluids, {} entities",
-        report.nodes, report.keyframes, report.blocks, report.fillers, report.fluids, report.entities
+        report.nodes,
+        report.keyframes,
+        report.blocks,
+        report.fillers,
+        report.fluids,
+        report.entities
     );
     println!("block rotation values: {:?}", report.rotations);
-    println!("prefab version/blockIdVersion: {:?}", report.prefab_versions);
+    println!(
+        "prefab version/blockIdVersion: {:?}",
+        report.prefab_versions
+    );
     for f in &report.failures {
         println!("FAILED {f}");
     }
     for n in &report.notes {
         println!("note {n}");
     }
-    println!("peak RSS {:.1} MB, {:.1} s", report.peak_rss as f64 / 1e6, report.seconds);
+    println!(
+        "peak RSS {:.1} MB, {:.1} s",
+        report.peak_rss as f64 / 1e6,
+        report.seconds
+    );
     let failed = report.models.failed + report.anims.failed + report.prefabs.failed;
     if failed > 0 {
         bail!("{failed} entries failed");
@@ -153,18 +192,31 @@ fn cmd_anim(assets: &Assets, id: &str, keys: bool) -> Result<()> {
         "{id}: {} frames = {:.3} s at {FPS} fps, {}, {} nodes, {} keyframes",
         a.duration,
         a.duration_s(),
-        if a.hold_last_keyframe { "holds its last keyframe" } else { "loops" },
+        if a.hold_last_keyframe {
+            "holds its last keyframe"
+        } else {
+            "loops"
+        },
         a.node_animations.len(),
         a.key_count()
     );
     for (name, n) in &a.node_animations {
-        let smooth = |v: &[bool]| format!("{}/{} smooth", v.iter().filter(|s| **s).count(), v.len());
+        let smooth =
+            |v: &[bool]| format!("{}/{} smooth", v.iter().filter(|s| **s).count(), v.len());
         let mut parts = Vec::new();
         if !n.position.is_empty() {
-            parts.push(format!("position {} ({})", n.position.len(), smooth(&n.position.iter().map(|k| k.smooth()).collect::<Vec<_>>())));
+            parts.push(format!(
+                "position {} ({})",
+                n.position.len(),
+                smooth(&n.position.iter().map(|k| k.smooth()).collect::<Vec<_>>())
+            ));
         }
         if !n.orientation.is_empty() {
-            parts.push(format!("orientation {} ({})", n.orientation.len(), smooth(&n.orientation.iter().map(|k| k.smooth()).collect::<Vec<_>>())));
+            parts.push(format!(
+                "orientation {} ({})",
+                n.orientation.len(),
+                smooth(&n.orientation.iter().map(|k| k.smooth()).collect::<Vec<_>>())
+            ));
         }
         if !n.shape_stretch.is_empty() {
             parts.push(format!("shapeStretch {}", n.shape_stretch.len()));
@@ -178,19 +230,44 @@ fn cmd_anim(assets: &Assets, id: &str, keys: bool) -> Result<()> {
         println!("  {name}: {}", parts.join(", "));
         if keys {
             for k in &n.position {
-                println!("    position    t={:<6} ({:.4}, {:.4}, {:.4}) {}", k.time, k.delta.x, k.delta.y, k.delta.z, k.interpolation_type.as_deref().unwrap_or("linear"));
+                println!(
+                    "    position    t={:<6} ({:.4}, {:.4}, {:.4}) {}",
+                    k.time,
+                    k.delta.x,
+                    k.delta.y,
+                    k.delta.z,
+                    k.interpolation_type.as_deref().unwrap_or("linear")
+                );
             }
             for k in &n.orientation {
-                println!("    orientation t={:<6} ({:.4}, {:.4}, {:.4}, {:.4}) {}", k.time, k.delta.x, k.delta.y, k.delta.z, k.delta.w, k.interpolation_type.as_deref().unwrap_or("linear"));
+                println!(
+                    "    orientation t={:<6} ({:.4}, {:.4}, {:.4}, {:.4}) {}",
+                    k.time,
+                    k.delta.x,
+                    k.delta.y,
+                    k.delta.z,
+                    k.delta.w,
+                    k.interpolation_type.as_deref().unwrap_or("linear")
+                );
             }
             for k in &n.shape_stretch {
-                println!("    stretch     t={:<6} ({:.4}, {:.4}, {:.4}) {}", k.time, k.delta.x, k.delta.y, k.delta.z, k.interpolation_type.as_deref().unwrap_or("linear"));
+                println!(
+                    "    stretch     t={:<6} ({:.4}, {:.4}, {:.4}) {}",
+                    k.time,
+                    k.delta.x,
+                    k.delta.y,
+                    k.delta.z,
+                    k.interpolation_type.as_deref().unwrap_or("linear")
+                );
             }
             for k in &n.shape_visible {
                 println!("    visible     t={:<6} {}", k.time, k.delta);
             }
             for k in &n.shape_uv_offset {
-                println!("    uvOffset    t={:<6} ({}, {})", k.time, k.delta.x, k.delta.y);
+                println!(
+                    "    uvOffset    t={:<6} ({}, {})",
+                    k.time, k.delta.x, k.delta.y
+                );
             }
         }
     }
@@ -230,10 +307,22 @@ fn cmd_prefab(assets: &Assets, id: &str, entities: usize, top: usize) -> Result<
             self.want > 0
         }
     }
-    let mut s = Stats { names: HashMap::new(), lo: [i32::MAX; 3], hi: [i32::MIN; 3], rotated: 0, fillers: 0, fluids: HashMap::new(), ents: vec![], want: entities };
+    let mut s = Stats {
+        names: HashMap::new(),
+        lo: [i32::MAX; 3],
+        hi: [i32::MIN; 3],
+        rotated: 0,
+        fillers: 0,
+        fluids: HashMap::new(),
+        ents: vec![],
+        want: entities,
+    };
     let (header, counts) = assets.with_reader(id, |r| prefab::stream(r, &mut s))?;
     println!("{id}");
-    println!("version {:?}, blockIdVersion {:?}, anchor {:?}", header.version, header.block_id_version, header.anchor);
+    println!(
+        "version {:?}, blockIdVersion {:?}, anchor {:?}",
+        header.version, header.block_id_version, header.anchor
+    );
     println!(
         "{} blocks ({} rotated, {} filler cells, {} distinct names), {} fluid cells, {} entities",
         counts.blocks,
@@ -259,11 +348,31 @@ fn cmd_prefab(assets: &Assets, id: &str, entities: usize, top: usize) -> Result<
     }
     for e in &s.ents {
         let c = e.get("Components").unwrap_or(e);
-        let model = c.pointer("/Model/Model/Id").and_then(|v| v.as_str()).unwrap_or("-");
-        let nameplate = c.pointer("/Nameplate/Text").and_then(|v| v.as_str()).unwrap_or("-");
-        let kinds: Vec<&str> = c.as_object().map(|o| o.keys().map(|k| k.as_str()).collect()).unwrap_or_default();
-        let pos = c.pointer("/Transform/Position").map(|p| format!("{:.2},{:.2},{:.2}", p["X"].as_f64().unwrap_or(0.0), p["Y"].as_f64().unwrap_or(0.0), p["Z"].as_f64().unwrap_or(0.0)));
-        println!("  entity model {model} name {nameplate} at {} [{}]", pos.unwrap_or_else(|| "-".into()), kinds.join(" "));
+        let model = c
+            .pointer("/Model/Model/Id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("-");
+        let nameplate = c
+            .pointer("/Nameplate/Text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("-");
+        let kinds: Vec<&str> = c
+            .as_object()
+            .map(|o| o.keys().map(|k| k.as_str()).collect())
+            .unwrap_or_default();
+        let pos = c.pointer("/Transform/Position").map(|p| {
+            format!(
+                "{:.2},{:.2},{:.2}",
+                p["X"].as_f64().unwrap_or(0.0),
+                p["Y"].as_f64().unwrap_or(0.0),
+                p["Z"].as_f64().unwrap_or(0.0)
+            )
+        });
+        println!(
+            "  entity model {model} name {nameplate} at {} [{}]",
+            pos.unwrap_or_else(|| "-".into()),
+            kinds.join(" ")
+        );
     }
     Ok(())
 }
@@ -289,10 +398,24 @@ fn run_bridge(cmd: Cmd, path: &std::path::Path) -> Result<()> {
             }
             Ok(())
         }
-        Cmd::Model { id, out, no_anim, clips } => {
-            let id = match hy.defs().item_path(&id).or_else(|| hy.defs().model_path(&id)) {
+        Cmd::Model {
+            id,
+            out,
+            no_anim,
+            clips,
+        } => {
+            let id = match hy
+                .defs()
+                .item_path(&id)
+                .or_else(|| hy.defs().model_path(&id))
+            {
                 Some(p) => p.to_string(),
-                None => find(hy.assets(), &id, &["", "Server/Models/", "Common/", "Server/Item/Items/"], &["", ".json", ".blockymodel"])?,
+                None => find(
+                    hy.assets(),
+                    &id,
+                    &["", "Server/Models/", "Common/", "Server/Item/Items/"],
+                    &["", ".json", ".blockymodel"],
+                )?,
             };
             let (mut am, report) = hy.load_animated_report(&id)?;
             if let Some(c) = &clips {
@@ -304,7 +427,13 @@ fn run_bridge(cmd: Cmd, path: &std::path::Path) -> Result<()> {
             let m = &am.model;
             let tris: usize = m.meshes.iter().map(|x| x.indices.len() / 3).sum();
             println!("{id}");
-            println!("  {} nodes, {} meshes ({} triangles), {} materials", m.nodes.len(), m.meshes.len(), tris, m.materials.len());
+            println!(
+                "  {} nodes, {} meshes ({} triangles), {} materials",
+                m.nodes.len(),
+                m.meshes.len(),
+                tris,
+                m.materials.len()
+            );
             {
                 // bounds of the rest pose, in model space
                 let world = gltf::world_matrices(m);
@@ -323,32 +452,70 @@ fn run_bridge(cmd: Cmd, path: &std::path::Path) -> Result<()> {
                     println!("  rest-pose bounds {lo:.3?} to {hi:.3?} m");
                 }
             }
-            println!("  texture: {}", report.texture.as_deref().unwrap_or("none found"));
-            println!("  {} clips{}", am.animations.len(), if no_anim { " (left out)" } else { "" });
+            println!(
+                "  texture: {}",
+                report.texture.as_deref().unwrap_or("none found")
+            );
+            println!(
+                "  {} clips{}",
+                am.animations.len(),
+                if no_anim { " (left out)" } else { "" }
+            );
             for a in am.animations.iter().take(12) {
-                println!("    {:<28} {:.3} s, {} channels", a.name, a.duration_s, a.channels.len());
+                println!(
+                    "    {:<28} {:.3} s, {} channels",
+                    a.name,
+                    a.duration_s,
+                    a.channels.len()
+                );
             }
             if am.animations.len() > 12 {
                 println!("    ... and {} more", am.animations.len() - 12);
             }
             if report.dropped_visible_keys + report.dropped_uv_keys > 0 {
-                println!("  left out of clips: {} shapeVisible keys, {} shapeUvOffset keys", report.dropped_visible_keys, report.dropped_uv_keys);
+                println!(
+                    "  left out of clips: {} shapeVisible keys, {} shapeUvOffset keys",
+                    report.dropped_visible_keys, report.dropped_uv_keys
+                );
             }
             if !report.missing_nodes.is_empty() {
-                println!("  clip nodes the model lacks: {}", report.missing_nodes.join(", "));
+                println!(
+                    "  clip nodes the model lacks: {}",
+                    report.missing_nodes.join(", ")
+                );
             }
             if !report.attachments_not_composed.is_empty() {
-                println!("  default attachments not composed: {}", report.attachments_not_composed.join(", "));
+                println!(
+                    "  default attachments not composed: {}",
+                    report.attachments_not_composed.join(", ")
+                );
             }
             if let Some(dir) = out {
-                let name = id.rsplit('/').next().unwrap().split('.').next().unwrap().to_string();
+                let name = id
+                    .rsplit('/')
+                    .next()
+                    .unwrap()
+                    .split('.')
+                    .next()
+                    .unwrap()
+                    .to_string();
                 let gltf_path = gltf::write_animated(&am, &name, &dir)?;
                 println!("  wrote {}", gltf_path.display());
             }
             Ok(())
         }
-        Cmd::Prefab { path: p, out, entities, top } => {
-            let id = find(hy.assets(), &p, &["", "Server/Prefabs/"], &["", ".prefab.json", ".json"])?;
+        Cmd::Prefab {
+            path: p,
+            out,
+            entities,
+            top,
+        } => {
+            let id = find(
+                hy.assets(),
+                &p,
+                &["", "Server/Prefabs/"],
+                &["", ".prefab.json", ".json"],
+            )?;
             cmd_prefab(hy.assets(), &id, entities, top)?;
             if let Some(dir) = out {
                 let (scene, report) = hy.load_scene_report(&id)?;
@@ -361,7 +528,11 @@ fn run_bridge(cmd: Cmd, path: &std::path::Path) -> Result<()> {
                 );
                 if !report.unresolved.is_empty() {
                     let n: u64 = report.unresolved.values().sum();
-                    println!("  {} cells of {} names matched no block:", n, report.unresolved.len());
+                    println!(
+                        "  {} cells of {} names matched no block:",
+                        n,
+                        report.unresolved.len()
+                    );
                     for (name, c) in report.unresolved.iter().take(10) {
                         println!("    {c:>6}  {name}");
                     }
@@ -391,7 +562,12 @@ fn cmd_check_bridge(hy: &hytale_unpack::bridge::Hytale, scenes: Option<f64>) -> 
     for id in &names {
         let kind = if id.starts_with("Server/Models/") && id.ends_with(".json") {
             // definitions without a Model (3D-less showcase entries) have nothing to load
-            if hy.defs().model_def(hy.assets(), id).map(|d| d.model.is_none()).unwrap_or(false) {
+            if hy
+                .defs()
+                .model_def(hy.assets(), id)
+                .map(|d| d.model.is_none())
+                .unwrap_or(false)
+            {
                 continue;
             }
             0
@@ -443,13 +619,24 @@ fn cmd_check_bridge(hy: &hytale_unpack::bridge::Hytale, scenes: Option<f64>) -> 
             }
         }
     }
-    for (i, label) in ["model definitions", "bare models", "block items", "prefab scenes"].iter().enumerate() {
+    for (i, label) in [
+        "model definitions",
+        "bare models",
+        "block items",
+        "prefab scenes",
+    ]
+    .iter()
+    .enumerate()
+    {
         println!("{label:<18} ok {:>6}  failed {:>5}", ok[i], failed[i]);
     }
     println!("{clips} clips built, {instances} scene instances");
     if !unresolved.is_empty() {
         let total: u64 = unresolved.values().sum();
-        println!("{} block names ({total} cells) matched no drawable block; most common:", unresolved.len());
+        println!(
+            "{} block names ({total} cells) matched no drawable block; most common:",
+            unresolved.len()
+        );
         let mut v: Vec<_> = unresolved.iter().collect();
         v.sort_by(|a, b| b.1.cmp(a.1));
         for (k, c) in v.iter().take(12) {
@@ -460,6 +647,10 @@ fn cmd_check_bridge(hy: &hytale_unpack::bridge::Hytale, scenes: Option<f64>) -> 
         println!("FAILED {f}");
     }
     let _ = Provider::game(hy);
-    println!("peak RSS {:.1} MB, {:.1} s", check::peak_rss() as f64 / 1e6, start.elapsed().as_secs_f64());
+    println!(
+        "peak RSS {:.1} MB, {:.1} s",
+        check::peak_rss() as f64 / 1e6,
+        start.elapsed().as_secs_f64()
+    );
     Ok(())
 }

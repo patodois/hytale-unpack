@@ -90,7 +90,9 @@ impl Defs {
                 continue;
             }
             if n.starts_with("Server/Models/") {
-                models.entry(stem(n).to_string()).or_insert_with(|| n.to_string());
+                models
+                    .entry(stem(n).to_string())
+                    .or_insert_with(|| n.to_string());
             } else if n.starts_with("Server/Item/") {
                 let s = stem(n).to_string();
                 let in_items = n.starts_with("Server/Item/Items/");
@@ -102,7 +104,11 @@ impl Defs {
                 }
             }
         }
-        Defs { models, items, cache: Mutex::new(HashMap::new()) }
+        Defs {
+            models,
+            items,
+            cache: Mutex::new(HashMap::new()),
+        }
     }
 
     pub fn model_paths(&self) -> impl Iterator<Item = &str> {
@@ -117,7 +123,13 @@ impl Defs {
         self.models.get(id).map(|s| s.as_str())
     }
 
-    fn resolve(&self, assets: &Assets, family: Family, path: &str, depth: u32) -> Result<Arc<Value>> {
+    fn resolve(
+        &self,
+        assets: &Assets,
+        family: Family,
+        path: &str,
+        depth: u32,
+    ) -> Result<Arc<Value>> {
         let key = (family, path.to_string());
         if let Some(v) = self.cache.lock().unwrap().get(&key) {
             return Ok(v.clone());
@@ -128,8 +140,14 @@ impl Defs {
         let own: Value = assets.read_json(path)?;
         let merged = match own.get("Parent").and_then(Value::as_str) {
             Some(parent) => {
-                let table = if family == Family::Models { &self.models } else { &self.items };
-                let ppath = table.get(parent).ok_or_else(|| anyhow!("{path}: Parent {parent:?} not found"))?;
+                let table = if family == Family::Models {
+                    &self.models
+                } else {
+                    &self.items
+                };
+                let ppath = table
+                    .get(parent)
+                    .ok_or_else(|| anyhow!("{path}: Parent {parent:?} not found"))?;
                 let base = self.resolve(assets, family, ppath, depth + 1)?;
                 let mut own = own;
                 if let Value::Object(m) = &mut own {
@@ -162,7 +180,10 @@ impl Defs {
         if depth > 32 {
             bail!("{id}: BlockType Parent chain too deep");
         }
-        let path = self.items.get(id).ok_or_else(|| anyhow!("{id}: no such item"))?;
+        let path = self
+            .items
+            .get(id)
+            .ok_or_else(|| anyhow!("{id}: no such item"))?;
         let item = self.item(assets, path)?;
         let Some(bt) = item.get("BlockType") else {
             return Ok(None);
@@ -185,7 +206,10 @@ impl Defs {
         if name == "Empty" {
             return Ok(None);
         }
-        let (id, state) = match name.strip_prefix('*').and_then(|n| n.split_once("_State_Definitions_")) {
+        let (id, state) = match name
+            .strip_prefix('*')
+            .and_then(|n| n.split_once("_State_Definitions_"))
+        {
             Some((id, state)) => (id, Some(state)),
             None => (name, None),
         };
@@ -226,7 +250,11 @@ pub struct ModelDef {
 impl ModelDef {
     pub fn from_json(v: &Value) -> Self {
         let s = |k: &str| v.get(k).and_then(Value::as_str).map(String::from);
-        let mut def = ModelDef { model: s("Model"), texture: s("Texture"), ..ModelDef::default() };
+        let mut def = ModelDef {
+            model: s("Model"),
+            texture: s("Texture"),
+            ..ModelDef::default()
+        };
         if let Some(sets) = v.get("AnimationSets").and_then(Value::as_object) {
             for (name, set) in sets {
                 let anims = set
@@ -252,7 +280,10 @@ impl ModelDef {
         if let Some(att) = v.get("DefaultAttachments").and_then(Value::as_array) {
             for a in att {
                 if let Some(m) = a.get("Model").and_then(Value::as_str) {
-                    def.attachments.push((m.to_string(), a.get("Texture").and_then(Value::as_str).map(String::from)));
+                    def.attachments.push((
+                        m.to_string(),
+                        a.get("Texture").and_then(Value::as_str).map(String::from),
+                    ));
                 }
             }
         }
@@ -278,7 +309,14 @@ pub enum Side {
 }
 
 impl Side {
-    pub const ALL: [Side; 6] = [Side::East, Side::West, Side::Up, Side::Down, Side::South, Side::North];
+    pub const ALL: [Side; 6] = [
+        Side::East,
+        Side::West,
+        Side::Up,
+        Side::Down,
+        Side::South,
+        Side::North,
+    ];
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -311,10 +349,16 @@ impl BlockDesc {
             other => DrawType::Other(other.map(String::from)),
         };
         let mut faces: [Option<String>; 6] = Default::default();
-        if let Some(t) = bt.get("Textures").and_then(Value::as_array).and_then(|a| a.first()) {
+        if let Some(t) = bt
+            .get("Textures")
+            .and_then(Value::as_array)
+            .and_then(|a| a.first())
+        {
             let get = |k: &str| t.get(k).and_then(Value::as_str).map(String::from);
             let (all, sides, updown) = (get("All"), get("Sides"), get("UpDown"));
-            let pick = |specific: Option<String>, group: &Option<String>| specific.or_else(|| group.clone()).or_else(|| all.clone());
+            let pick = |specific: Option<String>, group: &Option<String>| {
+                specific.or_else(|| group.clone()).or_else(|| all.clone())
+            };
             faces[0] = pick(get("East"), &sides);
             faces[1] = pick(get("West"), &sides);
             faces[2] = pick(get("Up"), &updown);
@@ -325,7 +369,10 @@ impl BlockDesc {
         BlockDesc {
             draw,
             faces,
-            model: bt.get("CustomModel").and_then(Value::as_str).map(String::from),
+            model: bt
+                .get("CustomModel")
+                .and_then(Value::as_str)
+                .map(String::from),
             model_texture: bt
                 .get("CustomModelTexture")
                 .and_then(Value::as_array)
@@ -333,7 +380,11 @@ impl BlockDesc {
                 .and_then(|t| t.get("Texture"))
                 .and_then(Value::as_str)
                 .map(String::from),
-            model_scale: bt.get("CustomModelScale").and_then(Value::as_f64).map(|x| x as f32).unwrap_or(1.0),
+            model_scale: bt
+                .get("CustomModelScale")
+                .and_then(Value::as_f64)
+                .map(|x| x as f32)
+                .unwrap_or(1.0),
             opacity: bt.get("Opacity").and_then(Value::as_str).map(String::from),
         }
     }
@@ -348,7 +399,10 @@ mod tests {
     fn merge_is_deep_for_objects_and_replaces_the_rest() {
         let base = json!({"A": {"x": 1, "y": [1, 2]}, "B": 1});
         let over = json!({"A": {"y": [3]}, "C": 2});
-        assert_eq!(merge(&base, &over), json!({"A": {"x": 1, "y": [3]}, "B": 1, "C": 2}));
+        assert_eq!(
+            merge(&base, &over),
+            json!({"A": {"x": 1, "y": [3]}, "B": 1, "C": 2})
+        );
     }
 
     #[test]
@@ -378,7 +432,14 @@ mod tests {
                               "Empty": {}}});
         let d = ModelDef::from_json(&v);
         assert_eq!(d.animation_sets.len(), 1);
-        assert_eq!(d.animation_sets["Idle"][0], AnimRef { path: "a/Idle.blockyanim".into(), speed: Some(0.5), looping: Some(true) });
+        assert_eq!(
+            d.animation_sets["Idle"][0],
+            AnimRef {
+                path: "a/Idle.blockyanim".into(),
+                speed: Some(0.5),
+                looping: Some(true)
+            }
+        );
     }
 
     #[test]

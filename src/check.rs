@@ -66,7 +66,11 @@ pub fn peak_rss() -> u64 {
         if unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut ru) } == 0 {
             let v = ru.ru_maxrss as u64;
             // macOS reports bytes, Linux kilobytes
-            return if cfg!(target_os = "macos") { v } else { v * 1024 };
+            return if cfg!(target_os = "macos") {
+                v
+            } else {
+                v * 1024
+            };
         }
     }
     0
@@ -93,7 +97,11 @@ pub fn run(assets: &Assets, mut progress: impl FnMut(&str, u64)) -> Result<Repor
     let mut r = Report::default();
     let mut names: Vec<&str> = assets
         .names()
-        .filter(|n| n.ends_with(".blockymodel") || n.ends_with(".blockyanim") || (n.starts_with("Server/Prefabs/") && n.ends_with(".prefab.json")))
+        .filter(|n| {
+            n.ends_with(".blockymodel")
+                || n.ends_with(".blockyanim")
+                || (n.starts_with("Server/Prefabs/") && n.ends_with(".prefab.json"))
+        })
         .collect();
     names.sort();
     for (i, name) in names.iter().enumerate() {
@@ -148,7 +156,12 @@ pub fn run(assets: &Assets, mut progress: impl FnMut(&str, u64)) -> Result<Repor
                     for (k, v) in sub.rotations {
                         *r.rotations.entry(k).or_default() += v;
                     }
-                    *r.prefab_versions.entry(format!("{:?}/{:?}", header.version, header.block_id_version)).or_default() += 1;
+                    *r.prefab_versions
+                        .entry(format!(
+                            "{:?}/{:?}",
+                            header.version, header.block_id_version
+                        ))
+                        .or_default() += 1;
                 }
                 Err(e) => {
                     r.prefabs.failed += 1;

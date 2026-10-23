@@ -25,7 +25,7 @@ impl std::fmt::Debug for Rgba {
 impl Rgba {
     /// Whether any texel is not fully opaque
     pub fn has_alpha(&self) -> bool {
-        self.data.chunks_exact(4).any(|p| p[3] != 255)
+        self.data.as_chunks::<4>().0.iter().any(|p| p[3] != 255)
     }
 }
 
@@ -33,7 +33,12 @@ pub fn decode_png(bytes: &[u8]) -> Result<Rgba> {
     let mut dec = png::Decoder::new(Cursor::new(bytes));
     dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = dec.read_info()?;
-    let mut buf = vec![0; reader.output_buffer_size().ok_or_else(|| anyhow::anyhow!("PNG too large"))?];
+    let mut buf = vec![
+        0;
+        reader
+            .output_buffer_size()
+            .ok_or_else(|| anyhow::anyhow!("PNG too large"))?
+    ];
     let info = reader.next_frame(&mut buf)?;
     buf.truncate(info.buffer_size());
     let (w, h) = (info.width, info.height);
@@ -42,7 +47,7 @@ pub fn decode_png(bytes: &[u8]) -> Result<Rgba> {
         png::ColorType::Rgba => buf,
         png::ColorType::Rgb => {
             let mut out = Vec::with_capacity(px * 4);
-            for p in buf.chunks_exact(3) {
+            for p in buf.as_chunks::<3>().0 {
                 out.extend_from_slice(&[p[0], p[1], p[2], 255]);
             }
             out
@@ -56,7 +61,7 @@ pub fn decode_png(bytes: &[u8]) -> Result<Rgba> {
         }
         png::ColorType::GrayscaleAlpha => {
             let mut out = Vec::with_capacity(px * 4);
-            for p in buf.chunks_exact(2) {
+            for p in buf.as_chunks::<2>().0 {
                 out.extend_from_slice(&[p[0], p[0], p[0], p[1]]);
             }
             out
@@ -66,7 +71,11 @@ pub fn decode_png(bytes: &[u8]) -> Result<Rgba> {
     if data.len() != px * 4 {
         bail!("PNG decoded to {} bytes for {w}x{h}", data.len());
     }
-    Ok(Rgba { width: w, height: h, data })
+    Ok(Rgba {
+        width: w,
+        height: h,
+        data,
+    })
 }
 
 pub fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>> {

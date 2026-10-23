@@ -59,22 +59,38 @@ fn archive_index_has_the_documented_counts() {
     assert_eq!(count(".blockyanim"), 6736);
     assert_eq!(count(".png"), 10901);
     assert_eq!(count(".ogg"), 4490);
-    assert_eq!(a.names_under("Server/Prefabs/").filter(|n| n.ends_with(".prefab.json")).count(), 7828);
+    assert_eq!(
+        a.names_under("Server/Prefabs/")
+            .filter(|n| n.ends_with(".prefab.json"))
+            .count(),
+        7828
+    );
 }
 
 #[test]
 fn the_player_is_human_sized_and_textured() {
     let hy = need!();
-    let (am, report) = hy.load_animated_report("Server/Models/Human/Player.json").unwrap();
-    assert_eq!(am.model.nodes.iter().filter(|n| n.name == "Pelvis").count(), 1);
-    assert_eq!(report.texture.as_deref(), Some("Common/Characters/Player_Textures/Player_Greyscale.png"));
+    let (am, report) = hy
+        .load_animated_report("Server/Models/Human/Player.json")
+        .unwrap();
+    assert_eq!(
+        am.model.nodes.iter().filter(|n| n.name == "Pelvis").count(),
+        1
+    );
+    assert_eq!(
+        report.texture.as_deref(),
+        Some("Common/Characters/Player_Textures/Player_Greyscale.png")
+    );
     let (lo, hi) = height(&am.model);
     // Player.json's hitbox is 1.85 high; the model's head top is a little above that
     assert!(lo.abs() < 0.02, "feet at {lo}");
     assert!((1.8..1.95).contains(&hi), "head at {hi}");
     // every UV is inside the texture
     for m in &am.model.meshes {
-        assert!(m.uvs.iter().all(|uv| (0.0..=1.0).contains(&uv[0]) && (0.0..=1.0).contains(&uv[1])));
+        assert!(m
+            .uvs
+            .iter()
+            .all(|uv| (0.0..=1.0).contains(&uv[0]) && (0.0..=1.0).contains(&uv[1])));
     }
     am.validate().unwrap();
 }
@@ -89,13 +105,29 @@ fn clips_come_from_the_animation_sets_with_parent_inheritance() {
     let walk = player.animation("Walk").unwrap();
     assert!((walk.duration_s - 1.0).abs() < 1e-3);
     // The Trork's definition has "Parent": "Player" and overrides some sets
-    let trork = hy.load_animated("Server/Models/Intelligent/Trork/Trork.json").unwrap();
+    let trork = hy
+        .load_animated("Server/Models/Intelligent/Trork/Trork.json")
+        .unwrap();
     assert!(trork.animation("Walk").is_some());
     assert!(trork.animations.len() > 100);
     // position channels with smooth keys are cubic, rotations are always spherical-linear
-    let cubic = walk.channels.iter().filter(|c| c.interpolation == Interpolation::CubicSpline).count();
-    let rot = walk.channels.iter().filter(|c| c.target == Target::Rotation).all(|c| c.interpolation == Interpolation::Linear);
-    assert!(cubic > 0 || walk.channels.iter().all(|c| c.target != Target::Translation));
+    let cubic = walk
+        .channels
+        .iter()
+        .filter(|c| c.interpolation == Interpolation::CubicSpline)
+        .count();
+    let rot = walk
+        .channels
+        .iter()
+        .filter(|c| c.target == Target::Rotation)
+        .all(|c| c.interpolation == Interpolation::Linear);
+    assert!(
+        cubic > 0
+            || walk
+                .channels
+                .iter()
+                .all(|c| c.target != Target::Translation)
+    );
     assert!(rot);
 }
 
@@ -117,7 +149,9 @@ fn blocks_are_cubes_or_models_standing_on_their_cell() {
     let stone = hy.block_model("Rock_Stone").unwrap().unwrap();
     let (lo, hi) = stone.bounds().unwrap();
     assert_eq!((lo, hi), ([-0.5, 0.0, -0.5], [0.5, 1.0, 0.5]));
-    let bench = hy.load("Server/Item/Items/Bench/Bench_WorkBench.json").unwrap();
+    let bench = hy
+        .load("Server/Item/Items/Bench/Bench_WorkBench.json")
+        .unwrap();
     assert!(!bench.meshes.is_empty());
     let (blo, _) = height(&bench);
     assert!(blo.abs() < 0.05, "bench floats at {blo}");
@@ -129,7 +163,10 @@ fn blocks_are_cubes_or_models_standing_on_their_cell() {
 fn state_names_resolve_to_their_state_models() {
     let hy = need!();
     let plain = hy.block_model("Rail").unwrap().unwrap();
-    let corner = hy.block_model("*Rail_State_Definitions_Corner_Left").unwrap().unwrap();
+    let corner = hy
+        .block_model("*Rail_State_Definitions_Corner_Left")
+        .unwrap()
+        .unwrap();
     assert_ne!(plain.meshes[0].positions, corner.meshes[0].positions);
 }
 
@@ -168,7 +205,12 @@ fn yaw_matches_the_way_roofs_climb_in_a_real_prefab() {
             }
         }
     }
-    let dirs = [[0.0, 0.0, -1.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]];
+    let dirs = [
+        [0.0, 0.0, -1.0],
+        [-1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [1.0, 0.0, 0.0],
+    ];
     for (rot, counts) in climbs {
         if rot > 3 {
             continue;
@@ -179,7 +221,10 @@ fn yaw_matches_the_way_roofs_climb_in_a_real_prefab() {
         let q = block_rotation(rot);
         let v = rotate(q, [0.0, 0.0, -1.0]);
         let want = dirs[best];
-        assert!((0..3).all(|k| (v[k] - want[k]).abs() < 1e-4), "rotation {rot}: {v:?} vs {want:?} ({counts:?})");
+        assert!(
+            (0..3).all(|k| (v[k] - want[k]).abs() < 1e-4),
+            "rotation {rot}: {v:?} vs {want:?} ({counts:?})"
+        );
     }
 }
 
@@ -209,17 +254,24 @@ fn a_prefab_loads_as_a_scene_of_placed_blocks() {
     assert_eq!(report.placed as usize, scene.instances.len());
     assert_eq!(report.blocks, report.placed + report.empty + report.fillers);
     assert!(scene.instances.len() > 1000);
-    assert!(scene.models.len() < 40, "models are shared between instances");
+    assert!(
+        scene.models.len() < 40,
+        "models are shared between instances"
+    );
     scene.validate().unwrap();
     // load_scene is the same scene
-    assert_eq!(hy.load_scene(id).unwrap().instances.len(), scene.instances.len());
+    assert_eq!(
+        hy.load_scene(id).unwrap().instances.len(),
+        scene.instances.len()
+    );
 }
 
 #[test]
 fn list_filters_by_substring_and_tags_kinds() {
     let hy = need!();
     let l = hy.list("Player.json").unwrap();
-    assert!(l.iter().any(|a| a.id == "Server/Models/Human/Player.json" && a.kind == rewrite_bridge::AssetKind::Character));
+    assert!(l.iter().any(|a| a.id == "Server/Models/Human/Player.json"
+        && a.kind == rewrite_bridge::AssetKind::Character));
     let l = hy.list("Townhall_001").unwrap();
     assert!(l.iter().all(|a| a.kind == rewrite_bridge::AssetKind::Level));
     assert!(hy.list("zzzz-no-such-thing").unwrap().is_empty());
@@ -230,10 +282,16 @@ fn every_prefab_in_a_sample_streams() {
     let hy = need!();
     let a = hy.assets();
     let mut n = 0;
-    for name in a.names_under("Server/Prefabs/").filter(|n| n.ends_with(".prefab.json")).step_by(97) {
+    for name in a
+        .names_under("Server/Prefabs/")
+        .filter(|n| n.ends_with(".prefab.json"))
+        .step_by(97)
+    {
         struct Nop;
         impl Visit for Nop {}
-        let (h, _) = a.with_reader(name, |r| prefab::stream(r, &mut Nop)).unwrap();
+        let (h, _) = a
+            .with_reader(name, |r| prefab::stream(r, &mut Nop))
+            .unwrap();
         assert_eq!((h.version, h.block_id_version), (Some(8), Some(11)));
         n += 1;
     }

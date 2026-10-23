@@ -96,7 +96,13 @@ impl BlockyAnim {
     pub fn key_count(&self) -> usize {
         self.node_animations
             .values()
-            .map(|n| n.position.len() + n.orientation.len() + n.shape_stretch.len() + n.shape_visible.len() + n.shape_uv_offset.len())
+            .map(|n| {
+                n.position.len()
+                    + n.orientation.len()
+                    + n.shape_stretch.len()
+                    + n.shape_visible.len()
+                    + n.shape_uv_offset.len()
+            })
             .sum()
     }
 
@@ -111,15 +117,37 @@ impl BlockyAnim {
                 if v.windows(2).any(|w| w[1] < w[0]) {
                     p.push(format!("{name}: {what} keyframes out of order"));
                 }
-                if v.iter().any(|t| !t.is_finite() || *t < 0.0 || *t > self.duration) {
+                if v.iter()
+                    .any(|t| !t.is_finite() || *t < 0.0 || *t > self.duration)
+                {
                     p.push(format!("{name}: {what} keyframe outside 0..duration"));
                 }
             };
-            times(n.position.iter().map(|k| k.time).collect(), "position", &mut p);
-            times(n.orientation.iter().map(|k| k.time).collect(), "orientation", &mut p);
-            times(n.shape_stretch.iter().map(|k| k.time).collect(), "shapeStretch", &mut p);
-            times(n.shape_visible.iter().map(|k| k.time).collect(), "shapeVisible", &mut p);
-            times(n.shape_uv_offset.iter().map(|k| k.time).collect(), "shapeUvOffset", &mut p);
+            times(
+                n.position.iter().map(|k| k.time).collect(),
+                "position",
+                &mut p,
+            );
+            times(
+                n.orientation.iter().map(|k| k.time).collect(),
+                "orientation",
+                &mut p,
+            );
+            times(
+                n.shape_stretch.iter().map(|k| k.time).collect(),
+                "shapeStretch",
+                &mut p,
+            );
+            times(
+                n.shape_visible.iter().map(|k| k.time).collect(),
+                "shapeVisible",
+                &mut p,
+            );
+            times(
+                n.shape_uv_offset.iter().map(|k| k.time).collect(),
+                "shapeUvOffset",
+                &mut p,
+            );
             for k in &n.orientation {
                 let q = k.delta;
                 let len = (q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w).sqrt();

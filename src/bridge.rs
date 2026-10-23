@@ -49,13 +49,15 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::{anyhow, bail, Context, Result};
 use rewrite_bridge::{
-    AlphaMode, AnimatedModel, AssetInfo, AssetKind, BoxError, Instance, Material, Mesh, Model, Node,
-    Provider, Scene, SceneModel, Transform,
+    AlphaMode, AnimatedModel, AssetInfo, AssetKind, BoxError, Instance, Material, Mesh, Model,
+    Node, Provider, Scene, SceneModel, Transform,
 };
 
 use crate::assets::Assets;
 use crate::blockyanim::BlockyAnim;
-use crate::blockymodel::{shape_faces, BlockyModel, FaceLayout, Settings, Shape, ShapeType, V3, FACE_TRIANGLES};
+use crate::blockymodel::{
+    shape_faces, BlockyModel, FaceLayout, Settings, Shape, ShapeType, FACE_TRIANGLES, V3,
+};
 use crate::defs::{BlockDesc, Defs, DrawType, ModelDef};
 use crate::image::{decode_png, Rgba};
 use crate::prefab::{self, decode_rotation, PrefabBlock, Visit};
@@ -103,7 +105,10 @@ fn kind_of_model(path: &str) -> AssetKind {
         AssetKind::Prop
     } else if path.contains("/Weapons/") {
         AssetKind::Weapon
-    } else if path.starts_with("Common/NPC/") || path.starts_with("Common/Characters/") || path.starts_with("Common/Cosmetics/") {
+    } else if path.starts_with("Common/NPC/")
+        || path.starts_with("Common/Characters/")
+        || path.starts_with("Common/Cosmetics/")
+    {
         AssetKind::Character
     } else {
         AssetKind::Other
@@ -123,7 +128,12 @@ impl Hytale {
     pub fn open(path: &Path) -> Result<Self> {
         let assets = Assets::open(path)?;
         let defs = Defs::new(&assets);
-        Ok(Hytale { assets, defs, images: Mutex::new(HashMap::new()), listing: OnceLock::new() })
+        Ok(Hytale {
+            assets,
+            defs,
+            images: Mutex::new(HashMap::new()),
+            listing: OnceLock::new(),
+        })
     }
 
     pub fn open_default() -> Result<Self> {
@@ -143,13 +153,31 @@ impl Hytale {
             let mut out = Vec::new();
             for n in self.assets.names() {
                 if n.starts_with("Server/Models/") && n.ends_with(".json") {
-                    out.push(AssetInfo { id: n.to_string(), name: stem(n).to_string(), kind: AssetKind::Character });
+                    out.push(AssetInfo {
+                        id: n.to_string(),
+                        name: stem(n).to_string(),
+                        kind: AssetKind::Character,
+                    });
                 } else if n.starts_with("Common/") && n.ends_with(".blockymodel") {
-                    let name = n.trim_start_matches("Common/").trim_end_matches(".blockymodel").to_string();
-                    out.push(AssetInfo { id: n.to_string(), name, kind: kind_of_model(n) });
+                    let name = n
+                        .trim_start_matches("Common/")
+                        .trim_end_matches(".blockymodel")
+                        .to_string();
+                    out.push(AssetInfo {
+                        id: n.to_string(),
+                        name,
+                        kind: kind_of_model(n),
+                    });
                 } else if n.starts_with("Server/Prefabs/") && n.ends_with(".prefab.json") {
-                    let name = n.trim_start_matches("Server/Prefabs/").trim_end_matches(".prefab.json").to_string();
-                    out.push(AssetInfo { id: n.to_string(), name, kind: AssetKind::Level });
+                    let name = n
+                        .trim_start_matches("Server/Prefabs/")
+                        .trim_end_matches(".prefab.json")
+                        .to_string();
+                    out.push(AssetInfo {
+                        id: n.to_string(),
+                        name,
+                        kind: AssetKind::Level,
+                    });
                 }
             }
             out.sort_by(|a, b| a.id.cmp(&b.id));
@@ -159,7 +187,10 @@ impl Hytale {
 
     /// Whether an item file is a block (has a `BlockType` after inheritance)
     pub fn is_block_item(&self, path: &str) -> bool {
-        self.defs.item(&self.assets, path).map(|v| v.get("BlockType").is_some()).unwrap_or(false)
+        self.defs
+            .item(&self.assets, path)
+            .map(|v| v.get("BlockType").is_some())
+            .unwrap_or(false)
     }
 
     /// Drops the decoded textures kept for reuse; for long sweeps over many models.
@@ -171,8 +202,13 @@ impl Hytale {
         if let Some(t) = self.images.lock().unwrap().get(zip_path) {
             return Ok(t.clone());
         }
-        let img = Arc::new(decode_png(&self.assets.read(zip_path)?).with_context(|| zip_path.to_string())?);
-        self.images.lock().unwrap().insert(zip_path.to_string(), img.clone());
+        let img = Arc::new(
+            decode_png(&self.assets.read(zip_path)?).with_context(|| zip_path.to_string())?,
+        );
+        self.images
+            .lock()
+            .unwrap()
+            .insert(zip_path.to_string(), img.clone());
         Ok(img)
     }
 
@@ -186,7 +222,9 @@ impl Hytale {
         let mut same: Vec<&str> = self
             .assets
             .names_under(&dir_prefix)
-            .filter(|n| n[dir.len() + 1..].find('/').is_none() && n.to_ascii_lowercase().ends_with(".png"))
+            .filter(|n| {
+                n[dir.len() + 1..].find('/').is_none() && n.to_ascii_lowercase().ends_with(".png")
+            })
             .filter(|n| {
                 let f = &n[dir.len() + 1..];
                 f.to_ascii_lowercase().starts_with(&lower) || f == "Texture.png"
@@ -194,13 +232,21 @@ impl Hytale {
             .collect();
         same.sort_by_key(|n| {
             let f = &n[dir.len() + 1..];
-            (!f.eq_ignore_ascii_case(&format!("{name}.png")), !f.starts_with(name), f.to_string())
+            (
+                !f.eq_ignore_ascii_case(&format!("{name}.png")),
+                !f.starts_with(name),
+                f.to_string(),
+            )
         });
         if let Some(t) = same.first() {
             return Some(t.to_string());
         }
         let sub = format!("{dir}/{name}_Textures/");
-        let mut in_folder: Vec<&str> = self.assets.names_under(&sub).filter(|n| n.to_ascii_lowercase().ends_with(".png")).collect();
+        let mut in_folder: Vec<&str> = self
+            .assets
+            .names_under(&sub)
+            .filter(|n| n.to_ascii_lowercase().ends_with(".png"))
+            .collect();
         in_folder.sort();
         in_folder.first().map(|s| s.to_string())
     }
@@ -209,17 +255,30 @@ impl Hytale {
         BlockyModel::parse(&self.assets.read(zip_path)?).with_context(|| zip_path.to_string())
     }
 
-    fn rig_for(&self, model_zip: &str, texture_zip: Option<&str>, extra_scale: f32) -> Result<(Rig, Option<String>)> {
+    fn rig_for(
+        &self,
+        model_zip: &str,
+        texture_zip: Option<&str>,
+        extra_scale: f32,
+    ) -> Result<(Rig, Option<String>)> {
         let bm = self.blocky(model_zip)?;
         let ppu = bm.pixels_per_unit(model_zip);
-        let tex_path = texture_zip.map(String::from).or_else(|| self.discover_texture(model_zip));
+        let tex_path = texture_zip
+            .map(String::from)
+            .or_else(|| self.discover_texture(model_zip));
         let tex = match &tex_path {
             Some(p) => Some(self.texture(p)?),
             None => None,
         };
         let name = stem(model_zip).to_string();
-        let label = tex_path.as_deref().map(|p| p.rsplit('/').next().unwrap_or(p).to_string()).unwrap_or_else(|| "untextured".into());
-        Ok((build_rig(&bm, &name, extra_scale / ppu, tex.as_deref(), &label), tex_path))
+        let label = tex_path
+            .as_deref()
+            .map(|p| p.rsplit('/').next().unwrap_or(p).to_string())
+            .unwrap_or_else(|| "untextured".into());
+        Ok((
+            build_rig(&bm, &name, extra_scale / ppu, tex.as_deref(), &label),
+            tex_path,
+        ))
     }
 
     /// Loads an entity model definition, a bare model or a block item as an animated model.
@@ -227,7 +286,11 @@ impl Hytale {
         let mut report = LoadReport::default();
         if id.starts_with("Server/Models/") && id.ends_with(".json") {
             let def = self.defs.model_def(&self.assets, id)?;
-            let model_path = Assets::common(def.model.as_deref().ok_or_else(|| anyhow!("{id}: no Model"))?);
+            let model_path = Assets::common(
+                def.model
+                    .as_deref()
+                    .ok_or_else(|| anyhow!("{id}: no Model"))?,
+            );
             let tex = def.texture.as_deref().map(Assets::common);
             let (rig, tex_path) = self.rig_for(&model_path, tex.as_deref(), 1.0)?;
             report.texture = tex_path;
@@ -245,7 +308,9 @@ impl Hytale {
             am.validate()?;
             Ok((am, report))
         } else if id.starts_with("Server/Item/") && id.ends_with(".json") {
-            let m = self.block_model(stem(id))?.ok_or_else(|| anyhow!("{id}: not a block that draws anything"))?;
+            let m = self
+                .block_model(stem(id))?
+                .ok_or_else(|| anyhow!("{id}: not a block that draws anything"))?;
             report.texture = m.materials.first().map(|m| m.name.clone());
             Ok(((*m).clone().into(), report))
         } else {
@@ -253,10 +318,22 @@ impl Hytale {
         }
     }
 
-    fn add_clip(&self, rig: &Rig, am: &mut AnimatedModel, report: &mut LoadReport, zip_path: &str, name: String, cache: &mut HashMap<String, Arc<BlockyAnim>>) {
+    fn add_clip(
+        &self,
+        rig: &Rig,
+        am: &mut AnimatedModel,
+        report: &mut LoadReport,
+        zip_path: &str,
+        name: String,
+        cache: &mut HashMap<String, Arc<BlockyAnim>>,
+    ) {
         let anim = match cache.get(zip_path) {
             Some(a) => a.clone(),
-            None => match self.assets.read(zip_path).and_then(|b| BlockyAnim::parse(&b).with_context(|| zip_path.to_string())) {
+            None => match self
+                .assets
+                .read(zip_path)
+                .and_then(|b| BlockyAnim::parse(&b).with_context(|| zip_path.to_string()))
+            {
                 Ok(a) => {
                     let a = Arc::new(a);
                     cache.insert(zip_path.to_string(), a.clone());
@@ -275,20 +352,40 @@ impl Hytale {
         am.animations.push(clip);
     }
 
-    fn add_def_clips(&self, rig: &Rig, def: &ModelDef, am: &mut AnimatedModel, report: &mut LoadReport) {
+    fn add_def_clips(
+        &self,
+        rig: &Rig,
+        def: &ModelDef,
+        am: &mut AnimatedModel,
+        report: &mut LoadReport,
+    ) {
         let mut cache = HashMap::new();
         for (set, refs) in &def.animation_sets {
             for r in refs {
                 let zip = Assets::common(&r.path);
-                let name = if refs.len() == 1 { set.clone() } else { format!("{set}/{}", stem(&zip)) };
+                let name = if refs.len() == 1 {
+                    set.clone()
+                } else {
+                    format!("{set}/{}", stem(&zip))
+                };
                 self.add_clip(rig, am, report, &zip, name, &mut cache);
             }
         }
     }
 
-    fn add_folder_clips(&self, rig: &Rig, model_zip: &str, am: &mut AnimatedModel, report: &mut LoadReport) {
-        let Some((dir, _)) = model_zip.rsplit_once('/') else { return };
-        let Some((parent, _)) = dir.rsplit_once('/') else { return };
+    fn add_folder_clips(
+        &self,
+        rig: &Rig,
+        model_zip: &str,
+        am: &mut AnimatedModel,
+        report: &mut LoadReport,
+    ) {
+        let Some((dir, _)) = model_zip.rsplit_once('/') else {
+            return;
+        };
+        let Some((parent, _)) = dir.rsplit_once('/') else {
+            return;
+        };
         let prefix = format!("{parent}/Animations/");
         let mut files: Vec<&str> = self
             .assets
@@ -298,7 +395,9 @@ impl Hytale {
         files.sort();
         let mut cache = HashMap::new();
         for f in files {
-            let name = f[prefix.len()..].trim_end_matches(".blockyanim").to_string();
+            let name = f[prefix.len()..]
+                .trim_end_matches(".blockyanim")
+                .to_string();
             self.add_clip(rig, am, report, f, name, &mut cache);
         }
     }
@@ -306,11 +405,19 @@ impl Hytale {
     /// A block by item id (`Rock_Stone`), prefab cell name (`*Rail_State_Definitions_Corner_Left`)
     /// or item path. `None` when the name draws nothing.
     pub fn block_model(&self, name: &str) -> Result<Option<Arc<Model>>> {
-        let name = if name.starts_with("Server/") { stem(name) } else { name };
+        let name = if name.starts_with("Server/") {
+            stem(name)
+        } else {
+            name
+        };
         let Some(desc) = self.defs.block(&self.assets, name)? else {
             return Ok(None);
         };
-        let mut model = Model { name: name.trim_start_matches('*').to_string(), nodes: vec![Node::new("block", None)], ..Model::default() };
+        let mut model = Model {
+            name: name.trim_start_matches('*').to_string(),
+            nodes: vec![Node::new("block", None)],
+            ..Model::default()
+        };
         let mut drew = false;
         if matches!(desc.draw, DrawType::Cube | DrawType::CubeWithModel) {
             drew |= self.add_cube(&mut model, &desc)?;
@@ -334,10 +441,20 @@ impl Hytale {
     fn add_cube(&self, model: &mut Model, desc: &BlockDesc) -> Result<bool> {
         // A 1 m cube standing on the cell's bottom centre: one mesh per texture
         let layout: BTreeMap<String, FaceLayout> =
-            ["front", "back", "left", "right", "top", "bottom"].iter().map(|k| (k.to_string(), FaceLayout::default())).collect();
+            ["front", "back", "left", "right", "top", "bottom"]
+                .iter()
+                .map(|k| (k.to_string(), FaceLayout::default()))
+                .collect();
         let shape = Shape {
             kind: ShapeType::Box,
-            settings: Settings { size: Some(V3 { x: 1.0, y: 1.0, z: 1.0 }), ..Settings::default() },
+            settings: Settings {
+                size: Some(V3 {
+                    x: 1.0,
+                    y: 1.0,
+                    z: 1.0,
+                }),
+                ..Settings::default()
+            },
             texture_layout: layout,
             ..Shape::default()
         };
@@ -362,7 +479,12 @@ impl Hytale {
                 m.alpha = AlphaMode::Mask(0.5);
             }
             model.materials.push(m);
-            let mut mesh = Mesh { name: format!("cube {tex}"), node: 0, material: model.materials.len() - 1, ..Mesh::default() };
+            let mut mesh = Mesh {
+                name: format!("cube {tex}"),
+                node: 0,
+                material: model.materials.len() - 1,
+                ..Mesh::default()
+            };
             for s in sides {
                 let f = &faces[s];
                 let base = mesh.positions.len() as u32;
@@ -424,7 +546,10 @@ impl Hytale {
                     return;
                 };
                 self.report.placed += 1;
-                self.instances.push(Instance::new(model, block_transform([b.x, b.y, b.z], self.anchor, b.rotation.unwrap_or(0))));
+                self.instances.push(Instance::new(
+                    model,
+                    block_transform([b.x, b.y, b.z], self.anchor, b.rotation.unwrap_or(0)),
+                ));
             }
         }
         impl Visit for Collector<'_> {
@@ -443,7 +568,10 @@ impl Hytale {
             models: Vec::new(),
             index: HashMap::new(),
             instances: Vec::new(),
-            report: SceneReport { anchor, ..SceneReport::default() },
+            report: SceneReport {
+                anchor,
+                ..SceneReport::default()
+            },
             anchor,
         };
         let (_, counts) = prefab::stream(&bytes[..], &mut c)?;
@@ -494,7 +622,13 @@ pub fn block_rotation(rotation: u32) -> [f32; 4] {
         q[a] = s;
         q
     };
-    qnorm(qmul(qmul(axis(1, yaw, ROTATION_SIGNS[0]), axis(0, pitch, ROTATION_SIGNS[1])), axis(2, roll, ROTATION_SIGNS[2])))
+    qnorm(qmul(
+        qmul(
+            axis(1, yaw, ROTATION_SIGNS[0]),
+            axis(0, pitch, ROTATION_SIGNS[1]),
+        ),
+        axis(2, roll, ROTATION_SIGNS[2]),
+    ))
 }
 
 /// Where a block model (origin at the bottom centre of its cell) goes for a prefab cell.
@@ -507,7 +641,11 @@ pub fn block_transform(cell: [i32; 3], anchor: [i32; 3], rotation: u32) -> Trans
     ];
     // rotate about the cell centre: the model origin sits half a cell below it
     let off = rotate(q, [0.0, -0.5, 0.0]);
-    Transform { translation: [centre[0] + off[0], centre[1] + off[1], centre[2] + off[2]], rotation: q, scale: [1.0; 3] }
+    Transform {
+        translation: [centre[0] + off[0], centre[1] + off[1], centre[2] + off[2]],
+        rotation: q,
+        scale: [1.0; 3],
+    }
 }
 
 impl Provider for Hytale {
@@ -520,15 +658,27 @@ impl Provider for Hytale {
         let mut out: Vec<AssetInfo> = self
             .base_listing()
             .iter()
-            .filter(|a| f.is_empty() || a.id.to_ascii_lowercase().contains(&f) || a.name.to_ascii_lowercase().contains(&f))
+            .filter(|a| {
+                f.is_empty()
+                    || a.id.to_ascii_lowercase().contains(&f)
+                    || a.name.to_ascii_lowercase().contains(&f)
+            })
             .cloned()
             .collect();
-        let mut items: Vec<&str> = self.assets.names_under("Server/Item/Items/").filter(|n| n.ends_with(".json")).collect();
+        let mut items: Vec<&str> = self
+            .assets
+            .names_under("Server/Item/Items/")
+            .filter(|n| n.ends_with(".json"))
+            .collect();
         items.sort();
         for n in items {
             let name = stem(n);
             if (f.is_empty() || n.to_ascii_lowercase().contains(&f)) && self.is_block_item(n) {
-                out.push(AssetInfo { id: n.to_string(), name: name.to_string(), kind: AssetKind::Prop });
+                out.push(AssetInfo {
+                    id: n.to_string(),
+                    name: name.to_string(),
+                    kind: AssetKind::Prop,
+                });
             }
         }
         out.sort_by(|a, b| a.id.cmp(&b.id));

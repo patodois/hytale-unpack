@@ -120,7 +120,11 @@ pub trait Visit {
 pub fn stream<R: Read>(reader: R, visit: &mut dyn Visit) -> Result<(PrefabHeader, Counts)> {
     let mut de = serde_json::Deserializer::from_reader(BufReader::with_capacity(1 << 16, reader));
     let mut out = (PrefabHeader::default(), Counts::default());
-    DocSeed { visit, out: &mut out }.deserialize(&mut de)?;
+    DocSeed {
+        visit,
+        out: &mut out,
+    }
+    .deserialize(&mut de)?;
     de.end()?;
     Ok(out)
 }
@@ -174,13 +178,25 @@ impl<'de, 'a> Visitor<'de> for DocSeed<'a> {
                 "anchorX" => out.0.anchor[0] = map.next_value()?,
                 "anchorY" => out.0.anchor[1] = map.next_value()?,
                 "anchorZ" => out.0.anchor[2] = map.next_value()?,
-                "blocks" => map.next_value_seed(ListSeed::<PrefabBlock> { f: &mut |b| visit.block(&b), n: &mut out.1.blocks })?,
-                "fluids" => map.next_value_seed(ListSeed::<PrefabFluid> { f: &mut |b| visit.fluid(&b), n: &mut out.1.fluids })?,
+                "blocks" => map.next_value_seed(ListSeed::<PrefabBlock> {
+                    f: &mut |b| visit.block(&b),
+                    n: &mut out.1.blocks,
+                })?,
+                "fluids" => map.next_value_seed(ListSeed::<PrefabFluid> {
+                    f: &mut |b| visit.fluid(&b),
+                    n: &mut out.1.fluids,
+                })?,
                 "entities" => {
                     if visit.wants_entities() {
-                        map.next_value_seed(ListSeed::<serde_json::Value> { f: &mut |e| visit.entity(&e), n: &mut out.1.entities })?
+                        map.next_value_seed(ListSeed::<serde_json::Value> {
+                            f: &mut |e| visit.entity(&e),
+                            n: &mut out.1.entities,
+                        })?
                     } else {
-                        map.next_value_seed(ListSeed::<IgnoredAny> { f: &mut |_| {}, n: &mut out.1.entities })?
+                        map.next_value_seed(ListSeed::<IgnoredAny> {
+                            f: &mut |_| {},
+                            n: &mut out.1.entities,
+                        })?
                     }
                 }
                 _ => {
@@ -265,7 +281,14 @@ mod tests {
         }
         let mut v = Names(vec![]);
         let (_, counts) = stream(DOC.as_bytes(), &mut v).unwrap();
-        assert_eq!(counts, Counts { blocks: 2, fluids: 1, entities: 1 });
+        assert_eq!(
+            counts,
+            Counts {
+                blocks: 2,
+                fluids: 1,
+                entities: 1
+            }
+        );
         assert_eq!(v.0, ["Rock_Slate", "Furniture_Village_Bookcase"]);
     }
 

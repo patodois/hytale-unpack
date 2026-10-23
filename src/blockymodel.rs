@@ -105,8 +105,16 @@ pub struct V3 {
 }
 
 impl V3 {
-    pub const ZERO: V3 = V3 { x: 0.0, y: 0.0, z: 0.0 };
-    pub const ONE: V3 = V3 { x: 1.0, y: 1.0, z: 1.0 };
+    pub const ZERO: V3 = V3 {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    };
+    pub const ONE: V3 = V3 {
+        x: 1.0,
+        y: 1.0,
+        z: 1.0,
+    };
     pub fn arr(self) -> [f32; 3] {
         [self.x, self.y, self.z]
     }
@@ -127,7 +135,12 @@ pub struct Quat {
 
 impl Default for Quat {
     fn default() -> Self {
-        Quat { x: 0.0, y: 0.0, z: 0.0, w: 1.0 }
+        Quat {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            w: 1.0,
+        }
     }
 }
 
@@ -305,13 +318,20 @@ impl BlockyModel {
         let mut p = Vec::new();
         let flat = self.flatten();
         if flat.len() > 255 {
-            p.push(format!("{} nodes, more than the 255 Hytale displays", flat.len()));
+            p.push(format!(
+                "{} nodes, more than the 255 Hytale displays",
+                flat.len()
+            ));
         }
         for f in &flat {
             let s = &f.node.shape;
             match s.kind {
-                ShapeType::Box if s.settings.size.is_none() => p.push(format!("{}: box without size", f.node.name)),
-                ShapeType::Quad if s.settings.size.is_none() => p.push(format!("{}: quad without size", f.node.name)),
+                ShapeType::Box if s.settings.size.is_none() => {
+                    p.push(format!("{}: box without size", f.node.name))
+                }
+                ShapeType::Quad if s.settings.size.is_none() => {
+                    p.push(format!("{}: quad without size", f.node.name))
+                }
                 _ => {}
             }
             for (k, l) in &s.texture_layout {
@@ -349,55 +369,92 @@ pub struct Face {
 /// Triangles of a face's four vertices, counter-clockwise seen from outside.
 pub const FACE_TRIANGLES: [[u32; 3]; 2] = [[0, 2, 1], [2, 3, 1]];
 
+/// A box side: its name, outward normal and corner signs
+type Side = (&'static str, [f32; 3], [[f32; 3]; 4]);
+
 /// side, outward normal, and the four corners as signs (-1 = from, +1 = to) of x, y, z. Corner 0
 /// is the top-left of the face seen from outside, 1 top-right, 2 bottom-left, 3 bottom-right.
-const SIDES: [(&str, [f32; 3], [[f32; 3]; 4]); 6] = [
-    ("right", [1.0, 0.0, 0.0], [[1.0, 1.0, 1.0], [1.0, 1.0, -1.0], [1.0, -1.0, 1.0], [1.0, -1.0, -1.0]]),
-    ("left", [-1.0, 0.0, 0.0], [[-1.0, 1.0, -1.0], [-1.0, 1.0, 1.0], [-1.0, -1.0, -1.0], [-1.0, -1.0, 1.0]]),
-    ("top", [0.0, 1.0, 0.0], [[-1.0, 1.0, -1.0], [1.0, 1.0, -1.0], [-1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]),
-    ("bottom", [0.0, -1.0, 0.0], [[-1.0, -1.0, 1.0], [1.0, -1.0, 1.0], [-1.0, -1.0, -1.0], [1.0, -1.0, -1.0]]),
-    ("front", [0.0, 0.0, 1.0], [[-1.0, 1.0, 1.0], [1.0, 1.0, 1.0], [-1.0, -1.0, 1.0], [1.0, -1.0, 1.0]]),
-    ("back", [0.0, 0.0, -1.0], [[1.0, 1.0, -1.0], [-1.0, 1.0, -1.0], [1.0, -1.0, -1.0], [-1.0, -1.0, -1.0]]),
+const SIDES: [Side; 6] = [
+    (
+        "right",
+        [1.0, 0.0, 0.0],
+        [
+            [1.0, 1.0, 1.0],
+            [1.0, 1.0, -1.0],
+            [1.0, -1.0, 1.0],
+            [1.0, -1.0, -1.0],
+        ],
+    ),
+    (
+        "left",
+        [-1.0, 0.0, 0.0],
+        [
+            [-1.0, 1.0, -1.0],
+            [-1.0, 1.0, 1.0],
+            [-1.0, -1.0, -1.0],
+            [-1.0, -1.0, 1.0],
+        ],
+    ),
+    (
+        "top",
+        [0.0, 1.0, 0.0],
+        [
+            [-1.0, 1.0, -1.0],
+            [1.0, 1.0, -1.0],
+            [-1.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0],
+        ],
+    ),
+    (
+        "bottom",
+        [0.0, -1.0, 0.0],
+        [
+            [-1.0, -1.0, 1.0],
+            [1.0, -1.0, 1.0],
+            [-1.0, -1.0, -1.0],
+            [1.0, -1.0, -1.0],
+        ],
+    ),
+    (
+        "front",
+        [0.0, 0.0, 1.0],
+        [
+            [-1.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0],
+            [-1.0, -1.0, 1.0],
+            [1.0, -1.0, 1.0],
+        ],
+    ),
+    (
+        "back",
+        [0.0, 0.0, -1.0],
+        [
+            [1.0, 1.0, -1.0],
+            [-1.0, 1.0, -1.0],
+            [1.0, -1.0, -1.0],
+            [-1.0, -1.0, -1.0],
+        ],
+    ),
 ];
 
 /// The corner UVs, in pixels, of a face of extent `(w, h)` with the given layout.
 ///
-/// The layout's `offset` is where the face's first corner sits; `mirror` makes the rectangle
-/// extend towards smaller u or v, and `angle` turns the texture on the face by quarter turns.
+/// Corner `i` of a face sits at face coordinates `(s, t)`: `(0, 0)`, `(1, 0)`, `(0, 1)`, `(1, 1)`.
+/// Its texel is found by stepping `s * w` along u and `t * h` along v from the layout's
+/// `offset`, each step negated when that axis is mirrored, and then turning that step by
+/// `angle` (quarter turns, `(u, v) -> (-v, u)` each) about the offset. So `offset` is always
+/// where corner 0 lands.
 pub fn face_uvs(layout: &FaceLayout, w: f32, h: f32) -> [[f32; 2]; 4] {
-    let (ox, oy) = (layout.offset.x, layout.offset.y);
-    let mut size = [w, h];
-    let mut m = [if layout.mirror.x { -1.0 } else { 1.0 }, if layout.mirror.y { -1.0 } else { 1.0 }];
-    // [u0, v0, u1, v1]: the rectangle the face covers, first corner first
-    let r = match layout.angle {
-        90 => {
-            size.swap(0, 1);
-            m.swap(0, 1);
-            m[0] *= -1.0;
-            [ox, oy + size[1] * m[1], ox + size[0] * m[0], oy]
+    let sign = |m: bool| if m { -1.0 } else { 1.0 };
+    let (du, dv) = (w * sign(layout.mirror.x), h * sign(layout.mirror.y));
+    let turns = layout.angle.rem_euclid(360) / 90;
+    [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]].map(|[s, t]: [f32; 2]| {
+        let mut step = [s * du, t * dv];
+        for _ in 0..turns {
+            step = [-step[1], step[0]];
         }
-        270 => {
-            size.swap(0, 1);
-            m.swap(0, 1);
-            m[1] *= -1.0;
-            [ox + size[0] * m[0], oy, ox, oy + size[1] * m[1]]
-        }
-        180 => {
-            m[0] *= -1.0;
-            m[1] *= -1.0;
-            [ox + size[0] * m[0], oy + size[1] * m[1], ox, oy]
-        }
-        _ => [ox, oy, ox + size[0] * m[0], oy + size[1] * m[1]],
-    };
-    let mut uv = [[r[0], r[1]], [r[2], r[1]], [r[0], r[3]], [r[2], r[3]]];
-    for _ in 0..(layout.angle.rem_euclid(360) / 90) {
-        let a = uv[0];
-        uv[0] = uv[2];
-        uv[2] = uv[3];
-        uv[3] = uv[1];
-        uv[1] = a;
-    }
-    uv
+        [layout.offset.x + step[0], layout.offset.y + step[1]]
+    })
 }
 
 /// The faces a shape draws. Empty for `none` shapes, shapes without a size, and boxes whose
@@ -412,7 +469,9 @@ pub fn shape_faces(shape: &Shape) -> Vec<Face> {
         ShapeType::Box => {
             let (sx, sy, sz) = (size.x, size.y, size.z);
             for (side, normal, corners) in SIDES {
-                let Some(layout) = shape.texture_layout.get(side) else { continue };
+                let Some(layout) = shape.texture_layout.get(side) else {
+                    continue;
+                };
                 let (w, h) = match side {
                     "left" | "right" => (sz, sy),
                     "top" | "bottom" => (sx, sz),
@@ -463,9 +522,19 @@ fn make_face(
 ) -> Face {
     let mut positions = [[0.0; 3]; 4];
     for (p, c) in positions.iter_mut().zip(corners) {
-        *p = [c[0] * dims[0] / 2.0, c[1] * dims[1] / 2.0, c[2] * dims[2] / 2.0];
+        *p = [
+            c[0] * dims[0] / 2.0,
+            c[1] * dims[1] / 2.0,
+            c[2] * dims[2] / 2.0,
+        ];
     }
-    Face { side, positions, normal, uv_px: face_uvs(layout, w, h), transparent: layout.transparent }
+    Face {
+        side,
+        positions,
+        normal,
+        uv_px: face_uvs(layout, w, h),
+        transparent: layout.transparent,
+    }
 }
 
 #[cfg(test)]
@@ -473,7 +542,12 @@ mod tests {
     use super::*;
 
     fn layout(x: f32, y: f32, mx: bool, my: bool, angle: i32) -> FaceLayout {
-        FaceLayout { offset: V2 { x, y }, mirror: Mirror { x: mx, y: my }, angle, ..FaceLayout::default() }
+        FaceLayout {
+            offset: V2 { x, y },
+            mirror: Mirror { x: mx, y: my },
+            angle,
+            ..FaceLayout::default()
+        }
     }
 
     #[test]
@@ -493,7 +567,9 @@ mod tests {
         // angle 90: the face covers 6 x 4 pixels, taller than wide, and the corners rotate
         let uv = face_uvs(&layout(0.0, 0.0, false, false, 90), 4.0, 6.0);
         let (us, vs): (Vec<f32>, Vec<f32>) = uv.iter().map(|p| (p[0], p[1])).unzip();
-        let span = |v: &[f32]| v.iter().cloned().fold(f32::MIN, f32::max) - v.iter().cloned().fold(f32::MAX, f32::min);
+        let span = |v: &[f32]| {
+            v.iter().cloned().fold(f32::MIN, f32::max) - v.iter().cloned().fold(f32::MAX, f32::min)
+        };
         assert_eq!((span(&us), span(&vs)), (6.0, 4.0));
         // four quarter turns come back to the start
         let a = face_uvs(&layout(3.0, 5.0, false, true, 0), 4.0, 6.0);
@@ -505,8 +581,18 @@ mod tests {
     fn faces_wind_counter_clockwise_from_outside() {
         let shape = Shape {
             kind: ShapeType::Box,
-            settings: Settings { size: Some(V3 { x: 2.0, y: 4.0, z: 6.0 }), ..Settings::default() },
-            texture_layout: FACE_KEYS.iter().map(|k| (k.to_string(), FaceLayout::default())).collect(),
+            settings: Settings {
+                size: Some(V3 {
+                    x: 2.0,
+                    y: 4.0,
+                    z: 6.0,
+                }),
+                ..Settings::default()
+            },
+            texture_layout: FACE_KEYS
+                .iter()
+                .map(|k| (k.to_string(), FaceLayout::default()))
+                .collect(),
             ..Shape::default()
         };
         let faces = shape_faces(&shape);
@@ -516,7 +602,11 @@ mod tests {
                 let p: Vec<[f32; 3]> = t.iter().map(|&i| f.positions[i as usize]).collect();
                 let a = [p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]];
                 let b = [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]];
-                let n = [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+                let n = [
+                    a[1] * b[2] - a[2] * b[1],
+                    a[2] * b[0] - a[0] * b[2],
+                    a[0] * b[1] - a[1] * b[0],
+                ];
                 let d = n[0] * f.normal[0] + n[1] * f.normal[1] + n[2] * f.normal[2];
                 assert!(d > 0.0, "{} winds clockwise", f.side);
             }
@@ -527,10 +617,20 @@ mod tests {
     fn quads_draw_only_their_normal_side() {
         let mut shape = Shape {
             kind: ShapeType::Quad,
-            settings: Settings { size: Some(V3 { x: 12.0, y: 7.0, z: 0.0 }), normal: Some("-X".into()), ..Settings::default() },
+            settings: Settings {
+                size: Some(V3 {
+                    x: 12.0,
+                    y: 7.0,
+                    z: 0.0,
+                }),
+                normal: Some("-X".into()),
+                ..Settings::default()
+            },
             ..Shape::default()
         };
-        shape.texture_layout.insert("front".into(), FaceLayout::default());
+        shape
+            .texture_layout
+            .insert("front".into(), FaceLayout::default());
         let faces = shape_faces(&shape);
         assert_eq!(faces.len(), 1);
         assert_eq!(faces[0].side, "left");
@@ -542,9 +642,18 @@ mod tests {
 
     #[test]
     fn density_follows_format_then_path() {
-        let m = |f: Option<&str>| BlockyModel { format: f.map(String::from), ..BlockyModel::default() };
-        assert_eq!(m(Some("prop")).pixels_per_unit("Common/Characters/a.blockymodel"), 32.0);
-        assert_eq!(m(Some("character")).pixels_per_unit("Common/Blocks/a.blockymodel"), 64.0);
+        let m = |f: Option<&str>| BlockyModel {
+            format: f.map(String::from),
+            ..BlockyModel::default()
+        };
+        assert_eq!(
+            m(Some("prop")).pixels_per_unit("Common/Characters/a.blockymodel"),
+            32.0
+        );
+        assert_eq!(
+            m(Some("character")).pixels_per_unit("Common/Blocks/a.blockymodel"),
+            64.0
+        );
         assert_eq!(m(None).pixels_per_unit("Common/Blocks/a.blockymodel"), 32.0);
         assert_eq!(m(None).pixels_per_unit("Common/NPC/a.blockymodel"), 64.0);
     }
