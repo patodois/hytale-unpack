@@ -389,3 +389,29 @@ fn every_prefab_in_a_sample_streams() {
     }
     assert!(n > 50);
 }
+
+#[test]
+fn a_block_with_a_texture_per_side_exports() {
+    // Soil_Grass shows grass on top, dirt below and a third texture on the sides: three meshes on
+    // the block's one node, which the glTF writer once refused ("node 0 carries more than one mesh")
+    let hy = need!();
+    let am = hy
+        .load_animated("Server/Item/Items/Soil/Grass/Soil_Grass.json")
+        .unwrap();
+    let meshes_on_the_node = am.model.meshes.iter().filter(|m| m.node == 0).count();
+    assert_eq!(
+        meshes_on_the_node,
+        3,
+        "{:?}",
+        am.model.meshes.iter().map(|m| &m.name).collect::<Vec<_>>()
+    );
+    let dir = std::env::temp_dir().join(format!("hytale-unpack-soil-{}", std::process::id()));
+    let path = hytale_unpack::gltf::write_animated(&am, "Soil_Grass", &dir).unwrap();
+    let doc: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let mesh = doc["nodes"][0]["mesh"].as_u64().unwrap() as usize;
+    assert_eq!(
+        doc["meshes"][mesh]["primitives"].as_array().unwrap().len(),
+        3
+    );
+}

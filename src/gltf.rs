@@ -228,7 +228,17 @@ impl Builder {
     }
 
     /// Adds a model's materials and meshes. Returns (material base, mesh index per model mesh).
-    fn add_model_data(&mut self, stem: &str, model: &Model) -> Result<(Vec<usize>, Vec<usize>)> {
+    ///
+    /// A glTF node carries one `mesh`, but a bridge node may carry several (a block with a
+    /// different texture on each side has one mesh per texture on its single node). With
+    /// `group_by_node` the meshes of one node become the primitives of one glTF mesh, and they
+    /// all get that mesh's index; without it each bridge mesh is a glTF mesh of its own.
+    fn add_model_data(
+        &mut self,
+        stem: &str,
+        model: &Model,
+        group_by_node: bool,
+    ) -> Result<(Vec<usize>, Vec<usize>)> {
         let mut mats = Vec::new();
         for m in &model.materials {
             let mut pbr = json!({"baseColorFactor": m.base_color_factor, "metallicFactor": m.metallic, "roughnessFactor": m.roughness});
@@ -253,6 +263,7 @@ impl Builder {
             mats.push(self.materials.len() - 1);
         }
         let mut meshes = Vec::new();
+        let mut of_node: HashMap<usize, usize> = HashMap::new();
         for mesh in &model.meshes {
             let n = mesh.positions.len();
             let flat: Vec<f32> = mesh.positions.iter().flatten().copied().collect();
@@ -286,8 +297,22 @@ impl Builder {
                 "SCALAR",
                 None,
             );
-            self.meshes.push(json!({"name": mesh.name, "primitives": [{"attributes": attrs, "indices": idx, "material": mats[mesh.material], "mode": 4}]}));
-            meshes.push(self.meshes.len() - 1);
+            let primitive = json!({"attributes": attrs, "indices": idx, "material": mats[mesh.material], "mode": 4});
+            if let Some(&shared) = group_by_node.then(|| of_node.get(&mesh.node)).flatten() {
+                let shared_mesh = &mut self.meshes[shared];
+                shared_mesh["primitives"]
+                    .as_array_mut()
+                    .expect("primitives is an array")
+                    .push(primitive);
+                // It is no longer one bridge mesh's: name it after the node they hang on
+                shared_mesh["name"] = json!(model.nodes[mesh.node].name);
+                meshes.push(shared);
+            } else {
+                self.meshes
+                    .push(json!({"name": mesh.name, "primitives": [primitive]}));
+                meshes.push(self.meshes.len() - 1);
+                of_node.insert(mesh.node, self.meshes.len() - 1);
+            }
         }
         Ok((mats, meshes))
     }
@@ -357,7 +382,7 @@ pub fn write_animated(am: &AnimatedModel, name: &str, out_dir: &Path) -> Result<
     am.validate()?;
     let mut b = Builder::default();
     let model = &am.model;
-    let (_, meshes) = b.add_model_data(name, model)?;
+    let (_, meshes) = b.add_model_data(name, model, true)?;
     let mut children: Vec<Vec<usize>> = vec![vec![]; model.nodes.len()];
     let mut roots = Vec::new();
     for (i, n) in model.nodes.iter().enumerate() {
@@ -370,12 +395,8 @@ pub fn write_animated(am: &AnimatedModel, name: &str, out_dir: &Path) -> Result<
         b.nodes.push(node_json(n, &children[i]));
     }
     for (mi, mesh) in model.meshes.iter().enumerate() {
+        // The meshes of one node share a glTF mesh (one primitive each)
         b.nodes[mesh.node]["mesh"] = json!(meshes[mi]);
-        if b.nodes[mesh.node].get("mesh").is_some()
-            && model.meshes.iter().filter(|m| m.node == mesh.node).count() > 1
-        {
-            bail!("node {} carries more than one mesh", mesh.node);
-        }
     }
     for clip in &am.animations {
         let mut samplers = Vec::new();
@@ -435,7 +456,7 @@ pub fn write_scene(scene: &Scene, name: &str, out_dir: &Path) -> Result<PathBuf>
         let SceneModel::Inline(model) = m else {
             bail!("write_scene needs inline models");
         };
-        let (_, meshes) = b.add_model_data(name, model)?;
+        let (_, meshes) = b.add_model_data(name, model, false)?;
         let world = world_matrices(model);
         per_model.push(
             model
@@ -480,6 +501,66 @@ mod tests {
                 assert!((m[i] - m2[i]).abs() < 1e-5, "{s:?} element {i}");
             }
         }
+    }
+
+    /// A unit cube-like model with one triangle per texture on its single node, as the bridge
+    /// provider builds blocks that show a different texture on each side
+    fn block_with_textures(n: usize) -> rewrite_bridge::AnimatedModel {
+        use rewrite_bridge::{Image, Material, Mesh, Node};
+        let mut model = Model {
+            name: "block".into(),
+            nodes: vec![Node::new("block", None)],
+            ..Model::default()
+        };
+        for i in 0..n {
+            model.materials.push(Material {
+                name: format!("side_{i}"),
+                base_color: Some(Image {
+                    width: 1,
+                    height: 1,
+                    rgba: vec![i as u8 * 60, 0, 0, 255],
+                }),
+                ..Material::default()
+            });
+            model.meshes.push(Mesh {
+                name: format!("cube side_{i}"),
+                node: 0,
+                material: i,
+                positions: vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                normals: vec![[0.0, 0.0, 1.0]; 3],
+                uvs: vec![[0.0; 2]; 3],
+                indices: vec![0, 1, 2],
+                ..Mesh::default()
+            });
+        }
+        model.validate().unwrap();
+        rewrite_bridge::AnimatedModel::new(model)
+    }
+
+    #[test]
+    fn a_node_with_several_meshes_is_written_as_one_mesh_with_primitives() {
+        let dir = std::env::temp_dir().join(format!("hytale-unpack-gltf-{}", std::process::id()));
+        let path = write_animated(&block_with_textures(3), "block", &dir).unwrap();
+        let doc: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+        let nodes = doc["nodes"].as_array().unwrap();
+        assert_eq!(nodes.len(), 1);
+        let mesh = nodes[0]["mesh"].as_u64().unwrap() as usize;
+        let meshes = doc["meshes"].as_array().unwrap();
+        assert_eq!(meshes.len(), 1, "one glTF mesh, not one per texture");
+        let prims = meshes[mesh]["primitives"].as_array().unwrap();
+        let materials: Vec<u64> = prims
+            .iter()
+            .map(|p| p["material"].as_u64().unwrap())
+            .collect();
+        assert_eq!(materials, [0, 1, 2]);
+        assert_eq!(meshes[mesh]["name"], "block");
+        // A model with one mesh per node is still one mesh per node
+        let one = block_with_textures(1);
+        let path = write_animated(&one, "one", &dir).unwrap();
+        let doc: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(doc["meshes"][0]["primitives"].as_array().unwrap().len(), 1);
     }
 
     #[test]
