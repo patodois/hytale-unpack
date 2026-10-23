@@ -16,7 +16,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 # then seeks to single entries, which is all we need (the archive is 3.5 GB: never read it whole)
 zip = { version = "8", default-features = false, features = ["deflate"] }
 # The bridge to other game rewrites (see src/bridge.rs, github.com/patodois/rewrite-bridge)
-rewrite-bridge = { git = "https://github.com/patodois/rewrite-bridge", rev = "1b5820180efbd585916ab206e6bcbbcf33096e1e", optional = true }
+rewrite-bridge = { git = "https://github.com/patodois/rewrite-bridge", rev = "93acfa2d06466ed3ca3715ae900f0ef45b38b27b", optional = true }
 
 # The peak memory report of `check`
 [target.'cfg(unix)'.dependencies]

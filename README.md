@@ -95,7 +95,7 @@ Credit for the format knowledge goes to that plugin and its authors.
 
 ## Provider
 
-`hytale_unpack::bridge::Hytale` implements `rewrite_bridge::Provider` (rev `1b58201`). Conventions are the
+`hytale_unpack::bridge::Hytale` implements `rewrite_bridge::Provider` (rev `93acfa2`). Conventions are the
 bridge's: metres, +Y up, right-handed, +Z front, counter-clockwise front faces, sRGB textures. One block (the
 game's unit) is taken as one metre, which the data does not state; it fits the player (hitbox 1.85 high,
 eye height 1.6, model about 1.89 tall).
