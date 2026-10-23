@@ -61,7 +61,12 @@ impl Assets {
 
     /// Opens the archive and reads its central directory.
     pub fn open(path: &Path) -> Result<Self> {
-        let file = File::open(path).with_context(|| format!("opening {}", path.display()))?;
+        let file = File::open(path).with_context(|| {
+            format!(
+                "opening {} (set HYTALE_ASSETS or pass --assets <path to Assets.zip>)",
+                path.display()
+            )
+        })?;
         let mut zip = ZipArchive::new(file)
             .with_context(|| format!("reading the central directory of {}", path.display()))?;
         let n = zip.len();

@@ -53,6 +53,7 @@ enum Cmd {
     /// Print a prefab's blocks and entities, or export it to glTF with -o
     Prefab {
         path: String,
+        /// Write the building as glTF (+ .bin and one PNG per block model) into OUT/<prefab name>/
         #[arg(short, long)]
         out: Option<PathBuf>,
         /// How many entities to print
@@ -96,7 +97,33 @@ fn find(assets: &Assets, id: &str, prefixes: &[&str], suffixes: &[&str]) -> Resu
     )
 }
 
+/// Die quietly when the reader of our output goes away (`list | head`), as other tools do.
+/// Rust ignores SIGPIPE by default, which turns the closed pipe into a panic inside `println!`.
+fn quiet_on_broken_pipe() {
+    #[cfg(unix)]
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+    #[cfg(not(unix))]
+    {
+        let default = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let msg = info
+                .payload()
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| info.payload().downcast_ref::<&str>().copied())
+                .unwrap_or("");
+            if msg.contains("Broken pipe") || msg.contains("os error 232") {
+                std::process::exit(0);
+            }
+            default(info)
+        }));
+    }
+}
+
 fn main() -> Result<()> {
+    quiet_on_broken_pipe();
     let cli = Cli::parse();
     let path = cli.assets.clone().unwrap_or_else(Assets::default_path);
     match cli.cmd {
@@ -112,7 +139,23 @@ fn main() -> Result<()> {
                 &p,
                 &["", "Common/", "Common/Characters/Animations/"],
                 &["", ".blockyanim"],
-            )?;
+            )
+            .map_err(|e| {
+                // clip ids are folder/name; show the clips whose path contains what was typed
+                let near: Vec<&str> = assets
+                    .names()
+                    .filter(|n| n.ends_with(".blockyanim") && n.contains(p.as_str()))
+                    .take(6)
+                    .collect();
+                if near.is_empty() {
+                    e.context("clips are addressed like Default/Walk; `list <text> --raw` finds them")
+                } else {
+                    e.context(format!(
+                        "clips are addressed like Default/Walk; paths containing {p:?} include:\n  {}",
+                        near.join("\n  ")
+                    ))
+                }
+            })?;
             cmd_anim(&assets, &id, keys)
         }
         cmd => {
@@ -155,7 +198,9 @@ fn main() -> Result<()> {
 
 fn cmd_check(path: &std::path::Path) -> Result<()> {
     let assets = Assets::open(path)?;
-    let report = check::run(&assets, |name, done| eprintln!("  {done:>6} {name}"))?;
+    let report = check::run(&assets, |name, done, total| {
+        eprintln!("checking {done} of {total} files, now {name}")
+    })?;
     let t = |name: &str, t: &check::Tally| {
         println!(
             "{name:<10} ok {:>6}  failed {:>4}  with notes {:>4}",
@@ -548,6 +593,8 @@ fn run_bridge(cmd: Cmd, path: &std::path::Path) -> Result<()> {
                         println!("    {c:>6}  {name}");
                     }
                 }
+                // a building comes with one texture per block model: give each prefab its own folder
+                let dir = dir.join(&scene.name);
                 let gltf_path = gltf::write_scene(&scene, &scene.name, &dir)?;
                 println!("wrote {}", gltf_path.display());
             }

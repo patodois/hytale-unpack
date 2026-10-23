@@ -18,29 +18,82 @@ The rule of this crate is **nothing invented, 1:1 with the game data**: whatever
 from the data or from the official Blockbench plugin is left out, and listed under
 [What is left out](#what-is-left-out).
 
+## What you need
+
+- **Hytale, installed with the official launcher.** This tool reads `Assets.zip` from your own copy; it ships
+  no game data. Default location of that file, which `hytale-unpack` looks at when you give no path:
+
+  | OS | `Assets.zip` |
+  |----|--------------|
+  | macOS | `~/Library/Application Support/Hytale/install/release/package/game/latest/Assets.zip` |
+  | Windows, Linux | no built-in default: find `Assets.zip` in the launcher's install folder (the same `install/release/package/game/latest/` layout, under the launcher's data folder) and point to it |
+
+  On any system, `export HYTALE_ASSETS=/path/to/Assets.zip` (or pass `--assets /path/to/Assets.zip` before the
+  subcommand) overrides the default. The Windows and Linux paths have not been tried by the author.
+- **Rust**, the stable toolchain from [rustup.rs](https://rustup.rs) (edition 2021; written and tested with
+  1.99), and `git`, because Cargo fetches [rewrite-bridge](https://github.com/patodois/rewrite-bridge) from GitHub.
+  A first release build takes about 10 seconds on an M-series Mac with 4 jobs (`cargo build --release -j 4`),
+  plus the dependency download.
+- **Disk and memory.** Nothing is extracted: the 3.5 GB archive is read entry by entry. The commands below
+  need between 100 MB and 350 MB of RAM (numbers beside each command), so a small laptop is fine.
+
+## Words used here
+
+- **`Assets.zip`**: the archive that holds the game's models, textures, sounds and JSON data. An *id* in this tool
+  is an entry path inside it.
+- **`.blockymodel`, `.blockyanim`**: Hytale's model (a tree of boxes and flat quads) and animation (keyframes per
+  node) files. A *clip* is one animation. A *prefab* is a stored building: a list of block cells.
+- **Entity model, block item**: JSON definitions that link a model to its texture and clips (`Server/Models`), or a
+  model to a block (`Server/Item/Items`).
+- **Attachment**: a separate model worn by another one (eyes, hair, hats). See [What is left out](#what-is-left-out).
+- **glTF**: the open 3D file format the exporter writes; any viewer or Blender opens it.
+- **[rewrite-bridge](https://github.com/patodois/rewrite-bridge)**: a small library with common model types, so
+  rewrites of different games can load each other's assets into one scene. A **`Provider`** is a game's reader
+  that implements it; this crate has one for Hytale. To write one for another game, see
+  [docs/WRITING_A_PROVIDER.md](https://github.com/patodois/rewrite-bridge/blob/main/docs/WRITING_A_PROVIDER.md).
+- **Conformance checker**: the bridge's test that a provider's output has the right units, orientation and
+  winding; see [Checking the provider](#checking-the-provider).
+- **RSS**: the memory a process holds; "peak RSS" is the most it held.
+
 ## Build and use
 
 ```sh
 cargo build --release          # the `bridge` feature (Provider, glTF, model/prefab export) is on by default
 cargo build --release --no-default-features   # parsers, `anim`, `prefab` (print only), `check`
 
-H=hytale-unpack                # target/release/hytale-unpack
-# Assets.zip is found at $HYTALE_ASSETS, else the macOS launcher's install; --assets <file> overrides
+export PATH=$PWD/target/release:$PATH   # so `hytale-unpack` works from anywhere (this shell only);
+                                        # or write `cargo run --release --` in front of each command below
+# Assets.zip: $HYTALE_ASSETS, else the macOS launcher's install (see above); --assets <file> overrides
 
-$H list Kweebec                # ids of models, entity models, block items and prefabs containing the text
-$H list Kweebec --raw          # raw archive entries instead
-$H model Human/Player -o out/  # entity model + its clips -> out/Player.gltf (+ .bin, .png)
-$H model Server/Models/Intelligent/Trork/Trork.json --clips Walk -o out/
-$H model Bench_WorkBench -o out/                  # a block item
-$H model Common/NPC/Beast/Bear_Grizzly/Models/Model.blockymodel   # a bare model, print only
-$H anim Walk                   # a clip: frames, nodes, keyframes (--keys lists them)
-$H prefab Server/Prefabs/Npc/Kweebec/Autumn/Houses_Small/Kweebec_Autumn_Houses_Small_001.prefab.json
-$H prefab <path> -o out/       # the same, plus the building as glTF with each block model stored once
+hytale-unpack list Kweebec                # ids of models, entity models, block items and prefabs containing the text
+hytale-unpack list Kweebec --raw          # raw archive entries instead (this is where clips show up)
+hytale-unpack model Human/Player -o out/  # entity model + its clips -> out/Player.gltf (+ .bin, .png)
+hytale-unpack model Server/Models/Intelligent/Trork/Trork.json --clips Walk -o out/
+hytale-unpack model Bench_WorkBench -o out/                  # a block item
+hytale-unpack model Common/NPC/Beast/Bear_Grizzly/Models/Model.blockymodel   # a bare model, print only
+hytale-unpack list Walk --raw | grep Animations/Default       # find a clip id ...
+hytale-unpack anim Default/Walk           # ... and print it: frames, nodes, keyframes (--keys lists them)
+hytale-unpack prefab Server/Prefabs/Npc/Kweebec/Autumn/Houses_Small/Kweebec_Autumn_Houses_Small_001.prefab.json
+hytale-unpack prefab <path> -o out/       # the same, plus the building as glTF in out/<prefab name>/ (one folder per prefab)
 
-$H check                       # parse every model, clip and prefab (streaming); counts and peak RSS
-$H check-bridge --scenes 30    # load everything through the Provider and validate it (prefabs under 30 MB)
-$H check-conformance --id Server/Models/Beast/Rat.json   # check what the Provider returns against the bridge's conventions
+hytale-unpack check                       # parse every model, clip and prefab (streaming); counts and peak RSS
+hytale-unpack check-bridge --scenes 30    # load everything through the Provider and validate it (prefabs under 30 MB)
+hytale-unpack check-conformance --filter Server/Models/Beast/ --limit 20   # check what the Provider returns against the bridge's conventions
 ```
+
+**Clip ids.** A clip is addressed by the folder under `Common/Characters/Animations/` plus its name, such as
+`Default/Walk` (the player's walk); a bare `Walk` is not enough, because the archive has dozens of them
+(`Items/Dual_Handed/Battleaxe/Walk`, `Default/Crouch_Walk`, ...). `list <text> --raw` shows the paths, and
+`anim` with an id it cannot find prints the paths that contain what you typed. `list` without `--raw` shows
+models, blocks and buildings, never clips; the clips of one model are in the output of `model <id>` (the
+`--clips <text>` filter works there too).
+
+**Time and memory** (release build, M-series Mac, 16 GB): `list` about 1.5 s and 120 MB (it reads the archive's
+index of 60,695 entries); `model` under 1 s and 100 MB; `check` about 7 s and 80 MB;
+`check-bridge --scenes 30` about 30 s and 200 to 350 MB (the 23 MB prefab dominates);
+`check-conformance` over everything about 23 s and 420 MB. Nothing loads the archive whole.
+
+The output of `list` goes through a pipe quietly (`hytale-unpack list Kweebec | head`).
 
 Ids are entry paths in `Assets.zip`; the commands also accept the file stem of an item or entity model
 (`Rock_Stone`, `Player`) and paths without the leading folder.
@@ -96,10 +149,21 @@ Credit for the format knowledge goes to that plugin and its authors.
 
 ## Provider
 
-`hytale_unpack::bridge::Hytale` implements `rewrite_bridge::Provider` (rev `0c5d0b0`). Conventions are the
+`hytale_unpack::bridge::Hytale` implements `rewrite_bridge::Provider` (rewrite-bridge `v0.1.0`). Conventions are the
 bridge's: metres, +Y up, right-handed, +Z front, counter-clockwise front faces, sRGB textures. One block (the
 game's unit) is taken as one metre, which the data does not state; it fits the player (hitbox 1.85 high,
 eye height 1.6, model about 1.89 tall).
+
+To use it from another crate, depend on both, and keep **rewrite-bridge on the same tag this crate uses**
+(`v0.1.0`): with two different versions of rewrite-bridge in one build, `Hytale` implements a `Provider` that
+your code's `Provider` is not, and the compiler reports "multiple different versions of crate `rewrite_bridge`".
+`cargo tree -i rewrite-bridge` must show a single copy.
+
+```toml
+[dependencies]
+hytale-unpack = { git = "https://github.com/patodois/hytale-unpack" }   # add rev = "<commit>" to pin it
+rewrite-bridge = { git = "https://github.com/patodois/rewrite-bridge", tag = "v0.1.0" }
+```
 
 ```rust
 let hy = hytale_unpack::bridge::Hytale::open_default()?;
@@ -153,17 +217,30 @@ scale, orientation, winding, skins, materials, clip names and durations, scenes.
 lists them); put `--assets` before the subcommand. Exit status 1 means an asset has an error.
 
 ```sh
-$H check-conformance --kind character --limit 20
-$H check-conformance --filter Rat -v
+hytale-unpack check-conformance --filter Server/Models/Beast/ --limit 20   # 20 creatures (entity models)
+hytale-unpack check-conformance --id Server/Models/Beast/Rat.json -v       # one creature, with the info findings
 ```
 
-On the install this was written against, every listed model, block and prefab loads, and no clip name repeats. The
-checker's remaining warnings come from the game's data or from what is left out, not from the loading:
-`animation.zero_scale` (clips hide nodes with a zero scale), `orientation.feet_off_ground` (flying creatures hover),
-`animation.empty` (clips like `Blink` only move the eyes, which are attachment models that are not composed (see
-[What is left out](#what-is-left-out)), so they keep their name and have no channels) and `front.not_plus_z` (three creature-like block models in one
-blockset prefab have eyes or a nose along +X or -X; the data does not say which way a block faces, so they are left
-as they are).
+(`--kind character` would list the attachment models first: beards, hair and ears, which are bare pieces.)
+
+On the install this was written against, every listed model, block and prefab loads, and no clip name repeats:
+0 errors. A full run (`hytale-unpack check-conformance`, 14,037 assets, about 23 s, peak RSS 420 MB) ends with this
+table of warnings, which come from the game's data or from what is left out, not from the loading:
+
+| warning | count | assets | what it means here |
+|---|---:|---:|---|
+| `animation.zero_scale` | 1,431 | 193 | clips hide a node by scaling it to zero: the blink (`L-Eye`, eyelids) in nearly all of them |
+| `orientation.feet_off_ground` | 541 | 541 | the lowest point is more than 0.3 m from the ground: attachment pieces modelled at head height (hair, beards, hats, eyes, ears) and a few flying creatures (bat, hawk, raven) |
+| `animation.empty` | 459 | 459 | clips with no channels because they only move nodes the model lacks: eyes and hair (separate attachment models, not composed), or another block's animation such as `Candle_Burn`, which a block model picks up from its folder |
+| `geometry.degenerate_triangles` | 129 | 20 | triangles with no area: boxes of zero thickness in hair and costume pieces and a few bones |
+| `scale.height_out_of_range` | 103 | 103 | under 0.2 m high: small pieces (eyebrows, shoes, gloves, a rattle) |
+| `scene.empty` | 50 | 50 | prefabs whose cells are all `Empty` (they carve holes in terrain, e.g. `Klops_Basalt_Cave_001`) |
+| `front.not_plus_z` | 50 | 48 | node names such as `Front`, `Nose` or `Eye` that point along +X or -X (24 of the assets are prefabs, i.e. block models inside them); the data does not say which way a block faces, so they are left as they are |
+| `orientation.not_upright` | 25 | 25 | flat pieces (ears, earrings, eyebrows, bracers) that are wider than tall |
+| `scale.too_small` | 2 | 2 | the two earring models |
+| `geometry.no_vertices` | 1 | 1 | `Common/NPC/MISC/Empty.blockymodel`, an empty model on purpose |
+
+Counts are findings, assets are the assets with at least one (an asset can have several of one code).
 
 ## Rendering checks
 
@@ -192,7 +269,7 @@ a keyframe past their `duration` (noted, not an error). **Peak RSS 79.9 MB, 6.5 
 
 `check-bridge --scenes 30` loads all 436 entity models with a model (69,323 clips built), all 2,830 bare models,
 all 2,956 block items and all 7,828 prefabs as scenes (14.75 million instances), validating each: 0 failures,
-no unresolved block names. Peak RSS 262 MB (the 23 MB prefab dominates).
+no unresolved block names. Peak RSS 200 to 350 MB (the 23 MB prefab dominates), about 30 s.
 
 ## What is left out
 

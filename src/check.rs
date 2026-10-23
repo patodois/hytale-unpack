@@ -91,8 +91,9 @@ impl Visit for Counter<'_> {
     }
 }
 
-/// Runs the check. `progress` is called with (category, done so far) every few hundred entries.
-pub fn run(assets: &Assets, mut progress: impl FnMut(&str, u64)) -> Result<Report> {
+/// Runs the check. `progress` is called with (entry being read, done so far, total) every few
+/// hundred entries.
+pub fn run(assets: &Assets, mut progress: impl FnMut(&str, u64, u64)) -> Result<Report> {
     let start = Instant::now();
     let mut r = Report::default();
     let mut names: Vec<&str> = assets
@@ -106,7 +107,7 @@ pub fn run(assets: &Assets, mut progress: impl FnMut(&str, u64)) -> Result<Repor
     names.sort();
     for (i, name) in names.iter().enumerate() {
         if i % 500 == 0 {
-            progress(name, i as u64);
+            progress(name, i as u64, names.len() as u64);
         }
         if name.ends_with(".blockymodel") {
             match assets.read(name).and_then(|b| BlockyModel::parse(&b)) {
