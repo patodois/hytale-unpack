@@ -51,6 +51,13 @@ from the data or from the official Blockbench plugin is left out, and listed und
   rewrites of different games can load each other's assets into one scene. A **`Provider`** is a game's reader
   that implements it; this crate has one for Hytale. To write one for another game, see
   [docs/WRITING_A_PROVIDER.md](https://github.com/patodois/rewrite-bridge/blob/main/docs/WRITING_A_PROVIDER.md).
+- **Other providers**: [nocturne-unpack](https://github.com/patodois/nocturne-unpack) (Shin Megami Tensei III
+  Nocturne HD Remaster), [wf-unpack](https://github.com/patodois/wf-unpack) (Warframe) and
+  [wt-unpack](https://github.com/patodois/wt-unpack) (War Thunder) read their games the same way and return the same
+  types, so a Hytale model can stand next to their characters.
+- **[bridge-testbed](https://github.com/patodois/bridge-testbed)**: a [Bevy](https://bevy.org) app that loads the
+  assets of every provider side by side, to check scale, orientation and animation across games by eye. It needs your
+  own game installs; no game data is in it.
 - **Conformance checker**: the bridge's test that a provider's output has the right units, orientation and
   winding; see [Checking the provider](#checking-the-provider).
 - **RSS**: the memory a process holds; "peak RSS" is the most it held.
@@ -67,9 +74,9 @@ export PATH=$PWD/target/release:$PATH   # so `hytale-unpack` works from anywhere
 
 hytale-unpack list Kweebec                # ids of models, entity models, block items and prefabs containing the text
 hytale-unpack list Kweebec --raw          # raw archive entries instead (this is where clips show up)
-hytale-unpack model Human/Player -o out/  # entity model + its clips -> out/Player.gltf (+ .bin, .png)
+hytale-unpack model Human/Player -o out/  # entity model + its clips -> out/Player.gltf, Player.bin, Player_0.png
 hytale-unpack model Server/Models/Intelligent/Trork/Trork.json --clips Walk -o out/
-hytale-unpack model Bench_WorkBench -o out/                  # a block item
+hytale-unpack model Bench_WorkBench -o out/                  # a block item (a block with a texture per side, such as Soil_Grass, exports too)
 hytale-unpack model Common/NPC/Beast/Bear_Grizzly/Models/Model.blockymodel   # a bare model, print only
 hytale-unpack list Walk --raw | grep Animations/Default       # find a clip id ...
 hytale-unpack anim Default/Walk           # ... and print it: frames, nodes, keyframes (--keys lists them)
@@ -88,10 +95,10 @@ hytale-unpack check-conformance --filter Server/Models/Beast/ --limit 20   # che
 models, blocks and buildings, never clips; the clips of one model are in the output of `model <id>` (the
 `--clips <text>` filter works there too).
 
-**Time and memory** (release build, M-series Mac, 16 GB): `list` about 1.5 s and 120 MB (it reads the archive's
-index of 60,695 entries); `model` under 1 s and 100 MB; `check` about 7 s and 80 MB;
-`check-bridge --scenes 30` about 30 s and 200 to 350 MB (the 23 MB prefab dominates);
-`check-conformance` over everything about 23 s and 420 MB. Nothing loads the archive whole.
+**Time and memory** (release build, M-series Mac, 16 GB, 23 October 2026, with other builds running; "peak" is the
+peak resident size): `list` 0.2 s and 120 MB (1 s when the archive's index of 60,695 entries is not in the file cache);
+`model` under 0.5 s and 90 MB; `check` about 5 s and 80 MB; `check-bridge --scenes 30` about 25 s and 300 to 390 MB (the
+23 MB prefab dominates); `check-conformance` over everything about 25 s and 400 MB. Nothing loads the archive whole.
 
 The output of `list` goes through a pipe quietly (`hytale-unpack list Kweebec | head`).
 
@@ -193,14 +200,20 @@ let house = hy.load_scene("Server/Prefabs/Npc/Kweebec/Autumn/Houses_Small/Kweebe
      `Fly/Fly`, `Fly/Fly@1.25` and `Fly/Fly@1.5`, and entries equal in file and speed get `#2`, `#3`;
   2. for a bare model `<dir>/<name>.blockymodel`, the plugin's rule: every `.blockyanim` in each folder of
      `<dir>/../Animations/`, named `<folder>/<file>`.
-  Clips address nodes by name and drive every node of that name; nodes the model lacks are skipped.
+  Clips address nodes by name and drive every node of that name; nodes the model lacks are skipped. A clip the
+  bridge would reject (a key at a negative time, say) is left out and named in `LoadReport::skipped_clips`, and
+  `model` prints it; the model still loads.
 - **Clips become channels:** `position` -> translation (rest + delta, metres), `orientation` -> rotation (rest *
   delta, spherical), `shapeStretch` -> scale of the `<name>/shape` node (stretch * delta). `smooth` position and
   stretch keyframes become cubic-spline keyframes reproducing the plugin's Catmull-Rom preview; rotations are always
   spherical (the plugin does this for Hytale formats). Times are frames / 60.
 - **Scenes** hold one inline model per distinct block and one instance per cell: cell `(x, y, z)` is
-  `[x, x+1] x [y, y+1] x [z, z+1]`, moved by minus the anchor, with the anchor cell centred on the origin and its
-  floor at y = 0. `rotation` is `yaw + 4 * pitch (+ 16 * roll)` in quarter turns, applied about the cell centre
+  `[x, x+1] x [y, y+1] x [z, z+1]`, moved by minus the anchor, so the anchor cell is `[0, 1]` in x, y and z (its
+  floor at y = 0, the origin at its lowest corner) and an unrotated block, whose model origin is its bottom centre,
+  is at `(x - ax + 0.5, y - ay, z - az + 0.5)`. The data decides this: a prefab's entities are in the same frame as its cells. Of the 743 entities that are not
+  spawn markers and stand at an integer y (in the prefabs under 3 MB), 680 have a block under their feet by either
+  rule, 26 only if the cell is found by rounding down, none only by rounding to the nearest, and 37 neither (a mannequin
+  at x = 2.85 stands on cell 2, which a cell centred on its coordinate would make cell 3). `rotation` is `yaw + 4 * pitch (+ 16 * roll)` in quarter turns, applied about the cell centre
   as `Ry(yaw) * Rx(pitch) * Rz(roll)`. Cells with a `filler` (parts of bigger blocks) and `Empty` cells are not drawn.
   `load_scene_report` also returns what was skipped.
 - **What is listed.** Only what draws something. Definitions in `Server/Models` without a `Model` (the showcase
@@ -224,7 +237,7 @@ hytale-unpack check-conformance --id Server/Models/Beast/Rat.json -v       # one
 (`--kind character` would list the attachment models first: beards, hair and ears, which are bare pieces.)
 
 On the install this was written against, every listed model, block and prefab loads, and no clip name repeats:
-0 errors. A full run (`hytale-unpack check-conformance`, 14,037 assets, about 23 s, peak RSS 420 MB) ends with this
+0 errors. A full run (`hytale-unpack check-conformance`, 14,037 assets, about 25 s, peak RSS 400 MB) ends with this
 table of warnings, which come from the game's data or from what is left out, not from the loading:
 
 | warning | count | assets | what it means here |
@@ -244,9 +257,21 @@ Counts are findings, assets are the assets with at least one (an asset can have 
 
 ## Rendering checks
 
-`render/` has a three.js + Playwright script that renders an exported glTF headless (`npm install` there, then
-`node shot.cjs out.png model.gltf "anim=Walk&frac=0.33&fit=1.0&dir=0.6,0.3,1" 800x700`). Used to check by eye
-(exported glTF files and renders are game content and are not in this repository):
+`render/` has a three.js + Playwright script that renders an exported glTF headless in Chromium. It needs
+[Node.js](https://nodejs.org) 20 or newer (tried with 24.16; `node -v` tells yours), and a browser for Playwright
+to drive, which `playwright-core` does not download by itself (without it the script stops with "Executable doesn't
+exist"):
+
+```sh
+cd render
+npm install                          # playwright-core and three, into render/node_modules
+npx playwright-core install chromium # the browser, about 580 MB in ~/Library/Caches/ms-playwright (once)
+node shot.cjs out.png model.gltf "anim=Walk&frac=0.33&fit=1.0&dir=0.6,0.3,1" 800x700
+```
+
+(`CHROMIUM=/path/to/chrome` uses a browser you already have instead of the download.) The model is the `.gltf` that
+`hytale-unpack model <id> -o <dir>` wrote, and the script prints what it drew (`{"tris":12,"nanim":0,...}`).
+Used to check by eye (exported glTF files and renders are game content and are not in this repository):
 
 - character: Trork (`Server/Models/Intelligent/Trork/Trork.json`) and the player;
 - animation: Trork `Walk` and player `Run`, three frames each;
@@ -265,11 +290,11 @@ Counts are findings, assets are the assets with at least one (an asset can have 
 
 39,440 nodes, 452,392 keyframes, 20,559,261 block cells (37,367 fillers), 207,019 fluid cells, 4,441 entities.
 Prefab versions: all `version 8` / `blockIdVersion 11`. Block `rotation` values seen: 1 to 11 only. Two clips have
-a keyframe past their `duration` (noted, not an error). **Peak RSS 79.9 MB, 6.5 s** (`/usr/bin/time -l`: 78 MB).
+a keyframe past their `duration` (noted, not an error). **Peak RSS 79 MB, about 5 s** (`/usr/bin/time -l`: 79 MB).
 
 `check-bridge --scenes 30` loads all 436 entity models with a model (69,323 clips built), all 2,830 bare models,
 all 2,956 block items and all 7,828 prefabs as scenes (14.75 million instances), validating each: 0 failures,
-no unresolved block names. Peak RSS 200 to 350 MB (the 23 MB prefab dominates), about 30 s.
+no unresolved block names. Peak RSS 300 to 390 MB (the 23 MB prefab dominates), about 25 s.
 
 ## What is left out
 
@@ -290,8 +315,7 @@ no unresolved block names. Peak RSS 200 to 350 MB (the 23 MB prefab dominates), 
   data (roofs climb towards -Z, -X, +Z, +X for 0 to 3, tested in `tests/game_data.rs`). The pitch and roll
   directions could not be checked (symmetric blocks only, or no roll values at all) and use the same
   right-handed sign; `bridge::ROTATION_SIGNS` flips them in one place if they prove wrong.
-- The meaning of `filler` offsets is not decoded; only "does not draw again" is used. Cell `[x, x+1]` versus a
-  cell centred on `x` is a convention (relative placement is unaffected).
+- The meaning of `filler` offsets is not decoded; only "does not draw again" is used.
 - The server (`HytaleServer.jar`) is not touched.
 
 ## Legal
