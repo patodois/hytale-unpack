@@ -58,7 +58,7 @@ use crate::blockyanim::BlockyAnim;
 use crate::blockymodel::{
     shape_faces, BlockyModel, FaceLayout, Settings, Shape, ShapeType, FACE_TRIANGLES, V3,
 };
-use crate::defs::{BlockDesc, Defs, DrawType, ModelDef};
+use crate::defs::{AnimRef, BlockDesc, Defs, DrawType, ModelDef};
 use crate::image::{decode_png, Rgba};
 use crate::prefab::{self, decode_rotation, PrefabBlock, Visit};
 use crate::rig::{build_clip, build_rig, qmul, qnorm, to_image, Rig};
@@ -120,6 +120,43 @@ fn stem(path: &str) -> &str {
     f.split('.').next().unwrap_or(f)
 }
 
+/// The clip names of one animation set: the set's name when it has one clip, else
+/// `Set/FileStem`.
+///
+/// A set may list the same file more than once and tell the entries apart only by their `Speed`
+/// (Bat: `Fly` is `Fly.blockyanim` at the default speed, at 1.25 and at 1.5). Those clips have the
+/// same name by the rule above, so each entry past the first of its name that carries a speed
+/// other than 1 gets `@speed` appended (`Fly/Fly`, `Fly/Fly@1.25`, `Fly/Fly@1.5`). Entries that
+/// are still equal after that (same file, same speed) are numbered `#2`, `#3`: the data has
+/// nothing else to tell them apart.
+fn clip_names(set: &str, refs: &[AnimRef]) -> Vec<String> {
+    if refs.len() == 1 {
+        return vec![set.to_string()];
+    }
+    let base: Vec<String> = refs
+        .iter()
+        .map(|r| format!("{set}/{}", stem(&Assets::common(&r.path))))
+        .collect();
+    let mut out: Vec<String> = Vec::with_capacity(refs.len());
+    for (i, r) in refs.iter().enumerate() {
+        let repeated = base[..i].contains(&base[i]) || base[i + 1..].contains(&base[i]);
+        let mut name = base[i].clone();
+        if repeated {
+            if let Some(speed) = r.speed.filter(|s| *s != 1.0) {
+                name = format!("{name}@{speed}");
+            }
+        }
+        let mut unique = name.clone();
+        let mut n = 2;
+        while out.contains(&unique) {
+            unique = format!("{name}#{n}");
+            n += 1;
+        }
+        out.push(unique);
+    }
+    out
+}
+
 fn berr(e: anyhow::Error) -> BoxError {
     format!("{e:#}").into()
 }
@@ -153,6 +190,16 @@ impl Hytale {
             let mut out = Vec::new();
             for n in self.assets.names() {
                 if n.starts_with("Server/Models/") && n.ends_with(".json") {
+                    // Definitions without a Model draw nothing: the showcase mannequins that are
+                    // only particles. One that does not resolve stays listed, so that loading
+                    // it reports why.
+                    if self
+                        .defs
+                        .model_def(&self.assets, n)
+                        .is_ok_and(|d| d.model.is_none())
+                    {
+                        continue;
+                    }
                     out.push(AssetInfo {
                         id: n.to_string(),
                         name: stem(n).to_string(),
@@ -185,12 +232,28 @@ impl Hytale {
         })
     }
 
-    /// Whether an item file is a block (has a `BlockType` after inheritance)
+    /// Whether an item file has a `BlockType` after inheritance. That does not make it a block:
+    /// the editor's brush filters (`Filter_Rock`) and prefab placers carry a `BlockType` that only
+    /// names a block list or a prefab list; see [`Hytale::is_drawable_block`].
     pub fn is_block_item(&self, path: &str) -> bool {
         self.defs
             .item(&self.assets, path)
             .map(|v| v.get("BlockType").is_some())
             .unwrap_or(false)
+    }
+
+    /// Whether an item file is a block with something to draw: a cube with at least one face
+    /// texture, or a custom model. `DrawType: Empty` blocks (`Barrier`) and the editor items that
+    /// only carry a list id are not, and the provider does not list them. A block whose
+    /// definition does not resolve counts as drawable, so that loading it reports the error.
+    pub fn is_drawable_block(&self, path: &str) -> bool {
+        if !self.is_block_item(path) {
+            return false;
+        }
+        match self.defs.block(&self.assets, stem(path)) {
+            Ok(desc) => desc.is_some_and(|d| d.draws()),
+            Err(_) => true,
+        }
     }
 
     /// Drops the decoded textures kept for reuse; for long sweeps over many models.
@@ -361,13 +424,9 @@ impl Hytale {
     ) {
         let mut cache = HashMap::new();
         for (set, refs) in &def.animation_sets {
-            for r in refs {
+            let names = clip_names(set, refs);
+            for (r, name) in refs.iter().zip(names) {
                 let zip = Assets::common(&r.path);
-                let name = if refs.len() == 1 {
-                    set.clone()
-                } else {
-                    format!("{set}/{}", stem(&zip))
-                };
                 self.add_clip(rig, am, report, &zip, name, &mut cache);
             }
         }
@@ -673,7 +732,7 @@ impl Provider for Hytale {
         items.sort();
         for n in items {
             let name = stem(n);
-            if (f.is_empty() || n.to_ascii_lowercase().contains(&f)) && self.is_block_item(n) {
+            if (f.is_empty() || n.to_ascii_lowercase().contains(&f)) && self.is_drawable_block(n) {
                 out.push(AssetInfo {
                     id: n.to_string(),
                     name: name.to_string(),
@@ -701,6 +760,62 @@ impl Provider for Hytale {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn r(path: &str, speed: Option<f32>) -> AnimRef {
+        AnimRef {
+            path: path.into(),
+            speed,
+            looping: None,
+        }
+    }
+
+    #[test]
+    fn a_single_clip_takes_the_name_of_its_set() {
+        assert_eq!(
+            clip_names("Idle", &[r("A/Default/Idle.blockyanim", None)]),
+            ["Idle"]
+        );
+    }
+
+    #[test]
+    fn several_clips_are_named_by_file() {
+        let refs = [
+            r("A/Jump_Far.blockyanim", None),
+            r("A/Jump_Far2.blockyanim", None),
+        ];
+        assert_eq!(
+            clip_names("JumpWalk", &refs),
+            ["JumpWalk/Jump_Far", "JumpWalk/Jump_Far2"]
+        );
+    }
+
+    #[test]
+    fn one_file_at_several_speeds_is_told_apart_by_speed() {
+        // Bat: Fly.blockyanim three times, at the default speed, 1.25 and 1.5
+        let refs = [
+            r("A/Fly.blockyanim", None),
+            r("A/Fly.blockyanim", Some(1.25)),
+            r("A/Fly.blockyanim", Some(1.5)),
+            r("A/Fly_Glide.blockyanim", Some(2.0)),
+        ];
+        assert_eq!(
+            clip_names("Fly", &refs),
+            ["Fly/Fly", "Fly/Fly@1.25", "Fly/Fly@1.5", "Fly/Fly_Glide"]
+        );
+    }
+
+    #[test]
+    fn identical_entries_are_numbered_as_the_last_resort() {
+        let refs = [
+            r("A/Fly.blockyanim", None),
+            r("A/Fly.blockyanim", Some(1.0)),
+            r("A/Fly.blockyanim", None),
+        ];
+        assert_eq!(
+            clip_names("Fly", &refs),
+            ["Fly/Fly", "Fly/Fly#2", "Fly/Fly#3"]
+        );
+    }
 
     #[test]
     fn unrotated_blocks_sit_on_their_cell() {

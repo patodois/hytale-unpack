@@ -278,6 +278,98 @@ fn list_filters_by_substring_and_tags_kinds() {
 }
 
 #[test]
+fn list_offers_only_what_draws() {
+    let hy = need!();
+    // editor tools whose BlockType only names a block list or a prefab list, an invisible block, and
+    // entity definitions that are only particles
+    for id in [
+        "Filter_TreeWoodAndLeaves",
+        "Filter_Rock",
+        "ExamplePrefabPlacementBlock_Tree",
+        "Barrier",
+        "Showcase_Mannequin_Inv_Portal",
+    ] {
+        let l = hy.list(id).unwrap();
+        assert!(
+            l.is_empty(),
+            "{id} is listed: {:?}",
+            l.first().map(|a| &a.id)
+        );
+    }
+    assert!(!hy.list("Rock_Stone").unwrap().is_empty());
+}
+
+#[test]
+fn everything_listed_that_is_not_a_prefab_loads() {
+    use rewrite_bridge::AssetKind;
+    let hy = need!();
+    let mut failures = Vec::new();
+    for (n, a) in hy.list("").unwrap().iter().enumerate() {
+        // blocks and entity models; the bare models are loaded by the conformance sweep
+        if a.kind == AssetKind::Level || !a.id.ends_with(".json") {
+            continue;
+        }
+        if n % 50 == 0 {
+            hy.clear_cache();
+        }
+        if let Err(e) = hy.load_animated(&a.id) {
+            failures.push(format!("{}: {e}", a.id));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn clip_names_are_unique() {
+    let hy = need!();
+    // The bat's Fly lists one file at three speeds; Pterodactyl does the same
+    for (id, slow, fast) in [
+        (
+            "Server/Models/Flying_Critter/Bat_Ice.json",
+            "Fly/Fly@1.25",
+            "Fly/Fly@1.5",
+        ),
+        (
+            "Server/Models/Flying_Critter/Bat.json",
+            "Fly/Fly@1.25",
+            "Fly/Fly@1.5",
+        ),
+        (
+            "Server/Models/Flying_Beast/Pterodactyl.json",
+            "Fly/Fly@1.2",
+            "Fly/Fly_Glide",
+        ),
+    ] {
+        let am = hy.load_animated(id).unwrap();
+        let mut names: Vec<&str> = am.animations.iter().map(|a| a.name.as_str()).collect();
+        let total = names.len();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), total, "{id} repeats a clip name");
+        for name in ["Fly/Fly", slow, fast] {
+            assert!(am.animation(name).is_some(), "{id} has no clip {name}");
+        }
+    }
+}
+
+#[test]
+fn a_sample_conforms_to_the_bridge() {
+    use rewrite_bridge::conformance::check_provider;
+    let hy = need!();
+    let ids = [
+        "Server/Models/Human/Player.json",
+        "Server/Models/Flying_Critter/Bat_Ice.json",
+        "Server/Item/Items/Bench/Bench_WorkBench.json",
+        "Server/Prefabs/Npc/Kweebec/Autumn/Houses_Small/Kweebec_Autumn_Houses_Small_001.prefab.json",
+    ];
+    for (id, report) in check_provider(hy, &ids, &[]) {
+        assert!(report.passed(), "{id}: {report}");
+        assert!(!report.has("provider.unlisted_id"), "{id} is not listed");
+        assert!(!report.has("animation.duplicate_name"), "{id}: {report}");
+    }
+}
+
+#[test]
 fn every_prefab_in_a_sample_streams() {
     let hy = need!();
     let a = hy.assets();

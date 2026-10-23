@@ -39,6 +39,7 @@ $H prefab <path> -o out/       # the same, plus the building as glTF with each b
 
 $H check                       # parse every model, clip and prefab (streaming); counts and peak RSS
 $H check-bridge --scenes 30    # load everything through the Provider and validate it (prefabs under 30 MB)
+$H check-conformance --id Server/Models/Beast/Rat.json   # check what the Provider returns against the bridge's conventions
 ```
 
 Ids are entry paths in `Assets.zip`; the commands also accept the file stem of an item or entity model
@@ -95,7 +96,7 @@ Credit for the format knowledge goes to that plugin and its authors.
 
 ## Provider
 
-`hytale_unpack::bridge::Hytale` implements `rewrite_bridge::Provider` (rev `93acfa2`). Conventions are the
+`hytale_unpack::bridge::Hytale` implements `rewrite_bridge::Provider` (rev `0c5d0b0`). Conventions are the
 bridge's: metres, +Y up, right-handed, +Z front, counter-clockwise front faces, sRGB textures. One block (the
 game's unit) is taken as one metre, which the data does not state; it fits the player (hitbox 1.85 high,
 eye height 1.6, model about 1.89 tall).
@@ -111,9 +112,9 @@ let house = hy.load_scene("Server/Prefabs/Npc/Kweebec/Autumn/Houses_Small/Kweebe
 
 | id | kind | `load` / `load_animated` / `load_scene` |
 |----|------|-----------------------------------------|
-| `Server/Models/**.json` | Character | model + texture; clips from `AnimationSets` |
+| `Server/Models/**.json` with a `Model` | Character | model + texture; clips from `AnimationSets` |
 | `Common/**.blockymodel` | Character, Weapon, Prop, Other by folder | model + the texture found next to it; clips by folder rule |
-| `Server/Item/Items/**.json` with a `BlockType` | Prop | the block: textured cube or custom model, origin at the bottom centre of its cell |
+| `Server/Item/Items/**.json` with a drawable `BlockType` | Prop | the block: textured cube or custom model, origin at the bottom centre of its cell |
 | `Server/Prefabs/**.prefab.json` | Level | `load_scene` only: one instance per block cell |
 
 - **Hierarchy.** One bridge node per Hytale node (its pivot), named after it; a node with a visible shape has one
@@ -123,7 +124,9 @@ let house = hy.load_scene("Server/Prefabs/Npc/Kweebec/Autumn/Houses_Small/Kweebe
   alpha-masked at 0.5, a `transparent` face blends.
 - **Which clips belong to a model** (`load_animated`):
   1. an entity model's `AnimationSets` (with `Parent` inheritance, so the Trork gets the player's sets unless it
-     overrides them): a one-clip set is named after the set (`Walk`), a bigger one `Set/<file>`;
+     overrides them): a one-clip set is named after the set (`Walk`), a bigger one `Set/<file>`. A set may list
+     one file several times, told apart only by `Speed` (the bat's `Fly`: default, 1.25, 1.5); those clips are
+     `Fly/Fly`, `Fly/Fly@1.25` and `Fly/Fly@1.5`, and entries equal in file and speed get `#2`, `#3`;
   2. for a bare model `<dir>/<name>.blockymodel`, the plugin's rule: every `.blockyanim` in each folder of
      `<dir>/../Animations/`, named `<folder>/<file>`.
   Clips address nodes by name and drive every node of that name; nodes the model lacks are skipped.
@@ -136,6 +139,31 @@ let house = hy.load_scene("Server/Prefabs/Npc/Kweebec/Autumn/Houses_Small/Kweebe
   floor at y = 0. `rotation` is `yaw + 4 * pitch (+ 16 * roll)` in quarter turns, applied about the cell centre
   as `Ry(yaw) * Rx(pitch) * Rz(roll)`. Cells with a `filler` (parts of bigger blocks) and `Empty` cells are not drawn.
   `load_scene_report` also returns what was skipped.
+- **What is listed.** Only what draws something. Definitions in `Server/Models` without a `Model` (the showcase
+  mannequins that are only particles) and items whose `BlockType` draws nothing are not listed: `DrawType: Empty`
+  (`Barrier`), and the editor's brush filters and prefab placers (`Filter_TreeWoodAndLeaves`, `Filter_Rock`,
+  `ExamplePrefabPlacementBlock_Tree`), whose `BlockType` only names a block list or a prefab list
+  (`BlockListAssetId`, `PrefabListAssetId`) for the tool to use. Prefab cells can still name any block.
+
+## Checking the provider
+
+`check-conformance` runs the bridge's conformance checker over what the provider returns, one asset at a time:
+scale, orientation, winding, skins, materials, clip names and durations, scenes. Options are the checker's
+(`--id` repeatable, `--filter`, `--kind`, `--limit`, `--compare-load`, `--allow`, `-v`, `--strict`; `--help`
+lists them); put `--assets` before the subcommand. Exit status 1 means an asset has an error.
+
+```sh
+$H check-conformance --kind character --limit 20
+$H check-conformance --filter Rat -v
+```
+
+On the install this was written against, every listed model, block and prefab loads, and no clip name repeats. The
+checker's remaining warnings come from the game's data or from what is left out, not from the loading:
+`animation.zero_scale` (clips hide nodes with a zero scale), `orientation.feet_off_ground` (flying creatures hover),
+`animation.empty` (clips like `Blink` only move the eyes, which are attachment models that are not composed (see
+[What is left out](#what-is-left-out)), so they keep their name and have no channels) and `front.not_plus_z` (three creature-like block models in one
+blockset prefab have eyes or a nose along +X or -X; the data does not say which way a block faces, so they are left
+as they are).
 
 ## Rendering checks
 

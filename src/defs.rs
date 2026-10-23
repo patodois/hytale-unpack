@@ -340,6 +340,17 @@ pub struct BlockDesc {
 }
 
 impl BlockDesc {
+    /// Whether the block has anything to draw: a cube with a texture on at least one face, or a
+    /// custom model. `Empty` blocks, blocks of an unknown draw type and items whose `BlockType`
+    /// only names a list (the editor's brush filters and prefab placers) have not.
+    pub fn draws(&self) -> bool {
+        let cube = matches!(self.draw, DrawType::Cube | DrawType::CubeWithModel)
+            && self.faces.iter().any(Option::is_some);
+        let model =
+            matches!(self.draw, DrawType::Model | DrawType::CubeWithModel) && self.model.is_some();
+        cube || model
+    }
+
     pub fn from_json(bt: &Value) -> Self {
         let draw = match bt.get("DrawType").and_then(Value::as_str) {
             Some("Cube") => DrawType::Cube,
@@ -413,6 +424,24 @@ mod tests {
         let f: Vec<_> = b.faces.iter().map(|f| f.as_deref().unwrap()).collect();
         // east, west, up, down, south, north
         assert_eq!(f, ["s.png", "s.png", "u.png", "a.png", "s.png", "s.png"]);
+    }
+
+    #[test]
+    fn only_blocks_with_a_texture_or_a_model_draw() {
+        let draws = |bt| BlockDesc::from_json(&bt).draws();
+        assert!(draws(
+            json!({"DrawType": "Cube", "Textures": [{"All": "a.png"}]})
+        ));
+        assert!(draws(
+            json!({"DrawType": "Model", "CustomModel": "Blocks/A.blockymodel"})
+        ));
+        assert!(!draws(
+            json!({"DrawType": "Empty", "Opacity": "Transparent"})
+        ));
+        assert!(!draws(json!({"DrawType": "Cube"})));
+        // the editor's brush filters name a block list and nothing else
+        assert!(!draws(json!({"BlockListAssetId": "TreeWoodAndLeaves"})));
+        assert!(!draws(json!({"PrefabListAssetId": "Trees"})));
     }
 
     #[test]
