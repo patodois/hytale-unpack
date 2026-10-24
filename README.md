@@ -18,6 +18,34 @@ The rule of this crate is **nothing invented, 1:1 with the game data**: whatever
 from the data or from the official Blockbench plugin is left out, and listed under
 [What is left out](#what-is-left-out).
 
+## Download
+
+Programs built for each release are on the [Releases page](https://github.com/patodois/hytale-unpack/releases). Pick the archive for your system:
+
+| System | Archive |
+|--------|---------|
+| macOS, Apple silicon | `hytale-unpack-<tag>-macos-arm64.tar.gz` |
+| macOS, Intel | `hytale-unpack-<tag>-macos-x86_64.tar.gz` |
+| Linux, x86_64 (glibc 2.35 or newer) | `hytale-unpack-<tag>-linux-x86_64.tar.gz` |
+| Windows, x86_64 | `hytale-unpack-<tag>-windows-x86_64.zip` |
+
+Each archive holds the program, this README, both license files and an `INSTALL.txt`. `SHA256SUMS` on the release page has
+the checksum of every archive (`shasum -a 256 -c SHA256SUMS` on macOS, `sha256sum -c SHA256SUMS` on Linux,
+`Get-FileHash` on Windows). They are built with the `bridge` feature (the default), so the rewrite-bridge provider and the glTF export are included.
+
+**The binaries contain no game data.** They are the program only; it reads the files of a copy of Hytale that you already have
+installed.
+
+They are not code-signed, so the first run may be blocked:
+
+- **macOS (Gatekeeper)**: a file downloaded in a browser is quarantined, and macOS refuses to open it ("Apple could not
+  verify ..."). Remove the mark once, from the folder you extracted to: `xattr -d com.apple.quarantine ./hytale-unpack`. Or open
+  System Settings > Privacy & Security and press "Open Anyway" after the first refusal.
+- **Windows (SmartScreen)**: "Windows protected your PC" appears the first time. Choose "More info", then "Run anyway". Or
+  right-click the downloaded `.zip`, open Properties and tick "Unblock" before you extract it.
+
+To build it yourself instead, see [Build and use](#build-and-use).
+
 ## What you need
 
 - **Hytale, installed with the official launcher.** This tool reads `Assets.zip` from your own copy; it ships
