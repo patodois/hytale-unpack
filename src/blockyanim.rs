@@ -26,7 +26,7 @@
 //!   keyframe and after the last, a channel holds its first and last value.
 //! - Several nodes of a model can share a name; a clip drives all of them.
 //!
-//! [`crate::bridge`] turns these into bridge clips. Smooth position and stretch keyframes become
+//! `crate::bridge` turns these into bridge clips. Smooth position and stretch keyframes become
 //! Catmull-Rom splines, as in the plugin's preview (three.js's `SplineCurve` with its end points
 //! doubled); rotations are always interpolated spherically between keyframes, as in the plugin
 //! for Hytale formats.

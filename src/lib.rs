@@ -7,9 +7,9 @@
 //! - [`blockymodel`], [`blockyanim`], [`prefab`]: the formats, with their documentation;
 //! - [`defs`]: the JSON definitions that link models to textures, clips and blocks;
 //! - [`image`]: PNG textures;
-//! - with the `bridge` feature (on by default): [`rig`] and [`gltf`] convert to
+//! - with the `bridge` feature (on by default): `rig` and `gltf` convert to
 //!   [rewrite-bridge](https://github.com/patodois/rewrite-bridge) types and glTF, and
-//!   [`bridge::Hytale`] is a `Provider`.
+//!   `bridge::Hytale` is a `Provider`.
 
 pub mod assets;
 pub mod blockyanim;

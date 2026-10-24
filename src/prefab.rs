@@ -16,7 +16,7 @@
 //!
 //! All files seen have `version` 8 and `blockIdVersion` 11. Block cells are integer
 //! coordinates, +Y up, in the prefab's own frame; `name` is an item id (a file stem under
-//! `Server/Item/Items`, see [`crate::blocks`]).
+//! `Server/Item/Items`, see [`crate::defs`]).
 //!
 //! # `rotation`
 //!
