@@ -1,5 +1,8 @@
 # hytale-unpack
 
+[![rewrite-bridge on crates.io](https://img.shields.io/crates/v/rewrite-bridge.svg?label=rewrite-bridge)](https://crates.io/crates/rewrite-bridge)
+[![rewrite-bridge docs](https://img.shields.io/docsrs/rewrite-bridge?label=docs.rs)](https://docs.rs/rewrite-bridge)
+
 A small Rust reader for the game data of Hytale, read from your own install:
 
 - `Assets.zip` (3.5 GB, 60,695 entries), through its central directory and single entries, never whole;
@@ -59,7 +62,7 @@ To build it yourself instead, see [Build and use](#build-and-use).
   On any system, `export HYTALE_ASSETS=/path/to/Assets.zip` (or pass `--assets /path/to/Assets.zip` before the
   subcommand) overrides the default. The Windows and Linux paths have not been tried by the author.
 - **Rust**, the stable toolchain from [rustup.rs](https://rustup.rs) (edition 2021; written and tested with
-  1.99), and `git`, because Cargo fetches [rewrite-bridge](https://github.com/patodois/rewrite-bridge) from GitHub.
+  1.99). Cargo downloads [rewrite-bridge](https://crates.io/crates/rewrite-bridge) from crates.io.
   A first release build takes about 10 seconds on an M-series Mac with 4 jobs (`cargo build --release -j 4`),
   plus the dependency download.
 - **Disk and memory.** Nothing is extracted: the 3.5 GB archive is read entry by entry. The commands below
@@ -184,20 +187,23 @@ Credit for the format knowledge goes to that plugin and its authors.
 
 ## Provider
 
-`hytale_unpack::bridge::Hytale` implements `rewrite_bridge::Provider` (rewrite-bridge `v0.1.0`). Conventions are the
+`hytale_unpack::bridge::Hytale` implements `rewrite_bridge::Provider` (rewrite-bridge `0.2`, from
+[crates.io](https://crates.io/crates/rewrite-bridge)). Conventions are the
 bridge's: metres, +Y up, right-handed, +Z front, counter-clockwise front faces, sRGB textures. One block (the
 game's unit) is taken as one metre, which the data does not state; it fits the player (hitbox 1.85 high,
 eye height 1.6, model about 1.89 tall).
 
-To use it from another crate, depend on both, and keep **rewrite-bridge on the same tag this crate uses**
-(`v0.1.0`): with two different versions of rewrite-bridge in one build, `Hytale` implements a `Provider` that
-your code's `Provider` is not, and the compiler reports "multiple different versions of crate `rewrite_bridge`".
+To use it from another crate, depend on both. Every crate in one build has to end up with the same copy of
+rewrite-bridge, or `Hytale` implements a `Provider` that your code's `Provider` is not, and the compiler reports
+"multiple different versions of crate `rewrite_bridge`". From crates.io Cargo does this for you: every `0.2`
+requirement (this crate asks for `0.2.1`, your `"0.2"` accepts it) resolves to one 0.2.x release and is built once.
+A requirement on another minor line (`"0.3"`) would be a second copy, so stay on the same `0.x` as this crate.
 `cargo tree -i rewrite-bridge` must show a single copy.
 
 ```toml
 [dependencies]
 hytale-unpack = { git = "https://github.com/patodois/hytale-unpack" }   # add rev = "<commit>" to pin it
-rewrite-bridge = { git = "https://github.com/patodois/rewrite-bridge", tag = "v0.1.0" }
+rewrite-bridge = "0.2"
 ```
 
 ```rust
