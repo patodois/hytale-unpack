@@ -84,7 +84,10 @@ pub fn decode_png(bytes: &[u8]) -> Result<Rgba> {
 /// greyscale, so a grey texel of value `v` takes the gradient's colour at column `v` (scaled when
 /// the gradient is not 256 wide), keeping its own alpha. Texels that are not grey (red, green and
 /// blue differing) are painted colours and stay as they are: the textures mix both (the player's
-/// skin is grey and its underwear blue). The gradient has 16 identical rows; the first is read.
+/// skin is grey and its underwear blue). The gradient files are 13 to 16 rows high and the rows are not identical (163 of the 212 differ
+/// from row 0, by up to 12 levels): reading row 0 is this crate's choice, nothing says which row
+/// the game uses, and the rows are not averaged. A texel counts as grey only when red, green and
+/// blue are exactly equal; a texel a level off stays as painted.
 ///
 /// The data does not describe this mapping. It is inferred from the files (a ramp to index by
 /// brightness) and was checked by eye against three of the game's own generated icons; see the

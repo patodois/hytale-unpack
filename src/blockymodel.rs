@@ -82,9 +82,8 @@
 //!
 //! Cosmetics, armour and the like are separate models worn by another one: an entity definition
 //! lists them under `DefaultAttachments` ([`crate::defs`]). A node with `shape.settings.isPiece:
-//! true` attaches to the node of the same name in the model it is worn on (the plugin's tooltip:
-//! "the node will be attached to a node of the same name when displayed as an attachment
-//! in-game"). The plugin is hosted on its author's own account and carries the studio's copyright
+//! true` attaches to the node of the same name in the model it is worn on (the plugin's tooltip for the
+//! flag says a piece goes onto the node with the same name when shown as an attachment). The plugin is hosted on its author's own account and carries the studio's copyright
 //! notice, but no official page confirms it as the studio's release; the README says which rules
 //! the game's icons confirm. What the plugin does with such a node, which is what this crate does
 //! (`Rig::attach` in `src/rig.rs`):
@@ -95,7 +94,8 @@
 //! - the piece itself disappears into that node: its own `position`, `orientation` and
 //!   `shape.offset` are not used. They are where the piece was modelled, and they do not agree
 //!   with the node it goes to (the face's `Head` piece is at y 79 px, the player's head pivot at
-//!   87); of the 2,060 pieces worn by entities 439 are rotated and 577 have an offset;
+//!   87); of the 1,888 pieces merged onto entities, 429 are rotated and 560 have an offset of their
+//!   own;
 //! - its children hang from that node, positioned like the children of any node, relative to its
 //!   pivot plus its shape offset. That is why a face quad authored 20 px below its `Head` piece
 //!   lands on the front of the head box: the head's offset (20 px) is added;

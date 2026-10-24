@@ -67,8 +67,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::{anyhow, bail, Context, Result};
 use rewrite_bridge::{
-    AlphaMode, AnimatedModel, AssetInfo, AssetKind, BoxError, Instance, Material, Mesh, Model,
-    Node, Provider, Scene, SceneModel, Transform,
+    AlphaMode, AnimatedModel, Animation, AssetInfo, AssetKind, BoxError, Instance, Material, Mesh,
+    Model, Node, Provider, Scene, SceneModel, Transform,
 };
 
 use crate::assets::Assets;
@@ -124,9 +124,25 @@ pub struct LoadReport {
     pub attachments: Vec<AttachmentNote>,
     /// What an entity definition lists as an attachment and was not composed, as `(what, why)`
     pub attachments_left_out: Vec<(String, String)>,
-    /// Clips that were left out because the bridge would not accept them (a negative key time,
-    /// for one), as `(name, why)`. The model itself still loads.
+    /// Clips that were left out whole because the bridge would not accept them for a reason that
+    /// is not one channel's (a bad duration, say), as `(name, why)`. The model itself still loads.
     pub skipped_clips: Vec<(String, String)>,
+    /// Channels that had keys before time 0, which the bridge does not accept, and a key at 0:
+    /// the early keys were dropped, which changes nothing sampled from 0 on. As
+    /// `(clip, "<node> <property>: <n> keys")`.
+    pub trimmed_channels: Vec<(String, String)>,
+    /// Channels left out of an otherwise kept clip, as `(clip, "<node> <property>: <why>")`
+    pub dropped_channels: Vec<(String, String)>,
+    /// Names that a clip drives several nodes of (the body has the name twice, or an attachment
+    /// added a node with the name of an earlier one)
+    pub names_driving_several_nodes: Vec<String>,
+}
+
+/// What `rig_for` did with a gradient
+#[derive(Default)]
+struct TintReport {
+    applied: Option<String>,
+    not_applied: Option<String>,
 }
 
 /// One attachment composed onto an entity model
@@ -138,12 +154,25 @@ pub struct AttachmentNote {
     pub texture: Option<String>,
     /// The gradient it was tinted with, as `Set/Id`
     pub tint: Option<String>,
+    /// Why a gradient the entry has (or half of one) was not applied, and the texture is worn as
+    /// it is: only one of `GradientSet` / `GradientId` is given (the missing half is not
+    /// inferred), or the gradient is not in `GradientSets.json`
+    pub tint_not_applied: Option<String>,
     /// `isPiece` nodes merged into nodes of the base model
     pub pieces: usize,
     pub nodes_added: usize,
     pub meshes_added: usize,
     /// `isPiece` nodes that found no node of that name and were left out with what hangs below
     pub unmatched_pieces: Vec<String>,
+    /// Merged pieces whose own orientation is not the identity (not used), and those with a
+    /// shape offset of their own (not used)
+    pub rotated_pieces: usize,
+    pub offset_pieces: usize,
+    /// Names of the added nodes that an earlier node already has (the body, or an earlier
+    /// attachment). They are kept as they are: a clip that names one drives all of them.
+    pub name_collisions: Vec<String>,
+    /// How many added nodes that is (a name can repeat)
+    pub name_collision_nodes: usize,
     /// `isPiece` nodes whose body node is a bare pivot with a shape offset, left out with what
     /// hangs below them (see [`crate::rig::AttachReport::bare_offset`])
     pub bare_offset_pieces: Vec<String>,
@@ -377,7 +406,7 @@ impl Hytale {
         texture_zip: Option<&str>,
         extra_scale: f32,
         gradient: Option<&GradientRef>,
-        tinted: &mut Option<String>,
+        tint: &mut TintReport,
     ) -> Result<(Rig, Option<String>)> {
         let bm = self.blocky(model_zip)?;
         let ppu = bm.pixels_per_unit(model_zip);
@@ -388,13 +417,14 @@ impl Hytale {
             Some(p) => Some(self.texture(p)?),
             None => None,
         };
-        let new = match (&tex, gradient) {
-            (Some(t), Some(g)) => self.tinted_texture(t.clone(), g).ok().map(|t2| (g, t2)),
-            _ => None,
-        };
-        if let Some((g, t2)) = new {
-            *tinted = Some(format!("{}/{}", g.set, g.id));
-            tex = Some(Arc::new(t2));
+        if let (Some(t), Some(g)) = (&tex, gradient) {
+            match self.tinted_texture(t.clone(), g) {
+                Ok(t2) => {
+                    tint.applied = Some(format!("{}/{}", g.set, g.id));
+                    tex = Some(Arc::new(t2));
+                }
+                Err(why) => tint.not_applied = Some(format!("{}/{}: {why}", g.set, g.id)),
+            }
         }
         let name = stem(model_zip).to_string();
         let label = tex_path
@@ -414,8 +444,9 @@ impl Hytale {
     }
 
     /// [`Hytale::load_animated_report`], choosing whether an entity's default attachments are
-    /// composed onto it (`false` gives the bare body, which is how every model loaded before
-    /// attachments were read).
+    /// composed onto it. `false` gives the body without them; its own texture is still tinted by
+    /// the entity's gradient where the data pairs the two (the 7 models of the README), as it is
+    /// with attachments, so the body is the same either way.
     pub fn load_animated_with(
         &self,
         id: &str,
@@ -430,22 +461,31 @@ impl Hytale {
                     .ok_or_else(|| anyhow!("{id}: no Model"))?,
             );
             let tex = def.texture.as_deref().map(Assets::common);
+            let mut tint = TintReport::default();
             let gradient = if def.gradient_paired() {
                 def.gradient.as_ref()
             } else {
                 if let Some(g) = &def.gradient {
-                    report.tint_not_applied = Some(format!(
+                    tint.not_applied = Some(format!(
                         "{}/{}: GradientSet from {}, Texture from {}",
                         g.set,
                         g.id,
                         def.gradient_from.as_deref().unwrap_or("?"),
                         def.texture_from.as_deref().unwrap_or("?")
                     ));
+                } else if def.gradient_from.is_some() || def.gradient_id_from.is_some() {
+                    tint.not_applied = Some(match (&def.gradient_from, &def.gradient_id_from) {
+                        (Some(f), None) => format!("GradientSet from {f} without a GradientId"),
+                        (None, Some(f)) => format!("GradientId from {f} without a GradientSet"),
+                        _ => "half a gradient pair".to_string(),
+                    });
                 }
                 None
             };
             let (mut rig, tex_path) =
-                self.rig_for(&model_path, tex.as_deref(), 1.0, gradient, &mut report.tint)?;
+                self.rig_for(&model_path, tex.as_deref(), 1.0, gradient, &mut tint)?;
+            report.tint = tint.applied;
+            report.tint_not_applied = tint.not_applied;
             report.texture = tex_path;
             if attachments {
                 self.compose_attachments(&mut rig, &def, &mut report);
@@ -456,7 +496,7 @@ impl Hytale {
             am.validate()?;
             Ok((am, report))
         } else if id.ends_with(".blockymodel") {
-            let (rig, tex_path) = self.rig_for(id, None, 1.0, None, &mut None)?;
+            let (rig, tex_path) = self.rig_for(id, None, 1.0, None, &mut TintReport::default())?;
             report.texture = tex_path;
             let mut am = AnimatedModel::new(rig.model.clone());
             self.add_folder_clips(&rig, id, &mut am, &mut report);
@@ -487,7 +527,10 @@ impl Hytale {
             ));
         }
         for a in &def.attachments {
-            if let Some(w) = a.weight {
+            if a.weighted {
+                let w = a
+                    .weight
+                    .map_or("not a number".to_string(), |w| w.to_string());
                 report.attachments_left_out.push((
                     a.model.clone(),
                     format!("entry has a Weight ({w}), which the data does not explain"),
@@ -566,14 +609,21 @@ impl Hytale {
             .map(Assets::common)
             .or_else(|| self.discover_texture(&model_path));
         let mut tint_name = None;
+        let mut tint_not_applied = a.half_gradient();
         let tex: Option<Rgba> = match &tex_path {
             Some(p) => {
                 let t = self.texture(p).map_err(|e| format!("{e:#}"))?;
-                match &a.gradient {
-                    Some(g) => {
-                        tint_name = Some(format!("{}/{}", g.set, g.id));
-                        Some(self.tinted_texture(t, g)?)
-                    }
+                match a.gradient() {
+                    Some(g) => match self.tinted_texture(t.clone(), &g) {
+                        Ok(t2) => {
+                            tint_name = Some(format!("{}/{}", g.set, g.id));
+                            Some(t2)
+                        }
+                        Err(why) => {
+                            tint_not_applied = Some(format!("{}/{}: {why}", g.set, g.id));
+                            Some((*t).clone())
+                        }
+                    },
                     None => Some((*t).clone()),
                 }
             }
@@ -584,14 +634,22 @@ impl Hytale {
             .map(|p| p.rsplit('/').next().unwrap_or(p).to_string())
             .unwrap_or_else(|| "untextured".into());
         let rep = rig.attach(&bm, tex.as_ref(), &label);
+        if let Some(why) = rep.problem {
+            return Err(why);
+        }
         Ok(AttachmentNote {
             model: model_path,
             texture: tex_path,
             tint: tint_name,
+            tint_not_applied,
             pieces: rep.pieces,
             nodes_added: rep.nodes_added,
             meshes_added: rep.meshes_added,
             unmatched_pieces: rep.unmatched,
+            rotated_pieces: rep.rotated_pieces,
+            offset_pieces: rep.offset_pieces,
+            name_collisions: rep.name_collisions,
+            name_collision_nodes: rep.name_collision_nodes,
             bare_offset_pieces: rep.bare_offset,
         })
     }
@@ -698,7 +756,7 @@ impl Hytale {
                     tex.as_deref(),
                     desc.model_scale,
                     None,
-                    &mut None,
+                    &mut TintReport::default(),
                 )?;
                 drew |= !rig.model.meshes.is_empty();
                 append_model(&mut model, &rig.model);
@@ -872,9 +930,9 @@ impl Hytale {
     }
 }
 
-/// Converts a clip for the rig and adds it to the model, unless the bridge would reject it. One
-/// bad clip (a key at a negative time, say) must not fail a model that holds hundreds of good
-/// ones: it is left out and named in the report.
+/// Converts a clip for the rig and adds it to the model. A channel the bridge would not accept (a
+/// key at a negative time that cannot be trimmed, say) is left out and named in the report; the
+/// rest of the clip stays. Only a clip that is wrong as a whole is skipped.
 fn push_clip(
     rig: &Rig,
     am: &mut AnimatedModel,
@@ -882,18 +940,66 @@ fn push_clip(
     anim: &BlockyAnim,
     name: String,
 ) {
-    let (clip, r) = build_clip(rig, anim, &name);
-    if let Err(e) = clip.validate(am.model.nodes.len()) {
-        report.skipped_clips.push((name, e.to_string()));
+    let (mut clip, r) = build_clip(rig, anim, &name);
+    let nodes = am.model.nodes.len();
+    let mut dropped: Vec<String> = Vec::new();
+    // one channel at a time: any that the bridge rejects by itself goes, the clip stays
+    let mut i = 0;
+    while i < clip.channels.len() {
+        let alone = Animation {
+            name: clip.name.clone(),
+            duration_s: clip.duration_s,
+            channels: vec![clip.channels[i].clone()],
+        };
+        match alone.validate(nodes) {
+            Ok(()) => i += 1,
+            Err(e) => {
+                let ch = clip.channels.remove(i);
+                dropped.push(format!(
+                    "{} of node {}: {}",
+                    format!("{:?}", ch.target).to_lowercase(),
+                    rig.model
+                        .nodes
+                        .get(ch.node)
+                        .map_or("?", |n| n.name.as_str()),
+                    reason(&name, &e.to_string())
+                ));
+            }
+        }
+    }
+    if let Err(e) = clip.validate(nodes) {
+        report
+            .skipped_clips
+            .push((name.clone(), reason(&name, &e.to_string())));
         return;
+    }
+    for d in r.dropped_channels.into_iter().chain(dropped) {
+        report.dropped_channels.push((name.clone(), d));
+    }
+    for t in r.trimmed_channels {
+        report.trimmed_channels.push((name.clone(), t));
     }
     report.dropped_visible_keys += r.dropped_visible_keys;
     report.dropped_uv_keys += r.dropped_uv_keys;
     report.missing_nodes.extend(r.missing_nodes);
     report.missing_nodes.sort();
     report.missing_nodes.dedup();
+    report
+        .names_driving_several_nodes
+        .extend(r.multi_node_names);
+    report.names_driving_several_nodes.sort();
+    report.names_driving_several_nodes.dedup();
     report.clips += 1;
     am.animations.push(clip);
+}
+
+/// The bridge's message for a clip starts with the clip's name; the report keeps the name apart
+fn reason(name: &str, msg: &str) -> String {
+    let mut m = msg;
+    while let Some(rest) = m.strip_prefix(&format!("{name}: ")) {
+        m = rest;
+    }
+    m.to_string()
 }
 
 fn append_model(into: &mut Model, from: &Model) {
@@ -1135,41 +1241,94 @@ mod tests {
         .into_bytes()
     }
 
+    fn clip_with_early_zero(time: i32) -> Vec<u8> {
+        format!(
+            r#"{{"duration":60,"nodeAnimations":{{"Root":{{
+                 "orientation":[
+                   {{"time":{time},"delta":{{"x":0,"y":0,"z":0.38,"w":0.92}}}},
+                   {{"time":0,"delta":{{"x":0,"y":0,"z":0,"w":1}}}},
+                   {{"time":30,"delta":{{"x":0,"y":0,"z":0.38,"w":0.92}}}}],
+                 "position":[
+                   {{"time":0,"delta":{{"x":0,"y":0,"z":0}}}},
+                   {{"time":30,"delta":{{"x":1,"y":0,"z":0}}}}]}}}}}}"#
+        )
+        .into_bytes()
+    }
+
+    fn push(rig: &Rig, json: Vec<u8>) -> (AnimatedModel, LoadReport) {
+        let anim = BlockyAnim::parse(&json).unwrap();
+        let mut am = AnimatedModel::new(rig.model.clone());
+        let mut report = LoadReport::default();
+        push_clip(rig, &mut am, &mut report, &anim, "Clip".to_string());
+        (am, report)
+    }
+
     #[test]
-    fn a_clip_the_bridge_rejects_is_skipped_and_reported_not_fatal() {
+    fn a_channel_with_a_key_before_zero_and_none_at_zero_is_dropped_not_the_clip() {
         let rig = tiny_rig();
-        let hy_report = |t: i32| {
-            let anim = BlockyAnim::parse(&clip_json(t)).unwrap();
-            let mut am = AnimatedModel::new(rig.model.clone());
-            let mut report = LoadReport::default();
-            push_clip(&rig, &mut am, &mut report, &anim, format!("Clip{t}"));
-            (am, report)
-        };
-        // The premise: a key at a negative time makes the bridge reject the clip, and with the
-        // clip in the model, the whole model
+        // the premise: a key at a negative time makes the bridge reject a clip that holds it
         let anim = BlockyAnim::parse(&clip_json(-5)).unwrap();
-        let (clip, _) = build_clip(&rig, &anim, "Bad");
+        let (mut clip, _) = build_clip(&rig, &anim, "Bad");
+        clip.channels.push(rewrite_bridge::Channel::new(
+            0,
+            rewrite_bridge::Target::Rotation,
+            rewrite_bridge::Interpolation::Linear,
+            vec![-0.1, 0.5],
+            vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+        ));
         assert!(clip.validate(rig.model.nodes.len()).is_err());
-        let mut whole = AnimatedModel::new(rig.model.clone());
-        whole.animations.push(clip);
-        assert!(whole.validate().is_err());
-        // Skipped: the model still validates, and the report names the clip
-        let (am, report) = hy_report(-5);
-        assert!(am.animations.is_empty());
-        assert_eq!(report.skipped_clips.len(), 1);
-        assert!(
-            report.skipped_clips[0].1.contains("Clip-5"),
-            "{:?}",
-            report.skipped_clips
-        );
-        assert_eq!(report.clips, 0);
-        am.validate().unwrap();
-        // A good clip is added as before
-        let (am, report) = hy_report(0);
+        // the position channel has keys at -5 and 30, none at 0: that channel goes, the clip stays
+        // and the model still validates
+        let (am, report) = push(&rig, clip_json(-5));
         assert_eq!(am.animations.len(), 1);
-        assert_eq!(report.clips, 1);
+        assert!(am.animations[0].channels.is_empty());
         assert!(report.skipped_clips.is_empty());
+        assert_eq!(
+            report.dropped_channels.len(),
+            1,
+            "{:?}",
+            report.dropped_channels
+        );
+        assert!(report.dropped_channels[0].1.contains("Root position"));
+        assert!(report.dropped_channels[0].1.contains("none at 0"));
+        assert_eq!(report.clips, 1);
         am.validate().unwrap();
+        // a clip with every key at or after 0 is added as before
+        let (am, report) = push(&rig, clip_json(0));
+        assert_eq!(am.animations[0].channels.len(), 1);
+        assert!(report.dropped_channels.is_empty() && report.trimmed_channels.is_empty());
+        am.validate().unwrap();
+    }
+
+    #[test]
+    fn keys_before_zero_are_trimmed_when_a_key_at_zero_makes_that_change_nothing() {
+        let rig = tiny_rig();
+        let (am, report) = push(&rig, clip_with_early_zero(-49));
+        am.validate().unwrap();
+        assert!(report.skipped_clips.is_empty() && report.dropped_channels.is_empty());
+        // the spherical rotation loses its early key; the linear position has none to lose
+        assert_eq!(report.trimmed_channels.len(), 1);
+        assert_eq!(report.trimmed_channels[0].1, "Root orientation: 1 keys");
+        let clip = &am.animations[0];
+        assert_eq!(clip.channels.len(), 2);
+        for ch in &clip.channels {
+            assert_eq!(ch.times[0], 0.0);
+        }
+        let rot = clip
+            .channels
+            .iter()
+            .find(|c| c.target == rewrite_bridge::Target::Rotation)
+            .unwrap();
+        assert_eq!(rot.times, [0.0, 0.5]);
+    }
+
+    #[test]
+    fn the_reason_of_a_skipped_clip_does_not_repeat_its_name() {
+        assert_eq!(
+            reason("RestUp", "RestUp: RestUp: channel 5: time -0.8 is negative"),
+            "channel 5: time -0.8 is negative"
+        );
+        assert_eq!(reason("A", "channel 1: x"), "channel 1: x");
     }
 
     #[test]

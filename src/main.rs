@@ -544,8 +544,20 @@ fn run_bridge(cmd: Cmd, path: &std::path::Path) -> Result<()> {
                     report.missing_nodes.join(", ")
                 );
             }
-            for (_, why) in &report.skipped_clips {
-                println!("  clip skipped: {why}");
+            for (clip, why) in &report.skipped_clips {
+                println!("  clip skipped: {clip}: {why}");
+            }
+            for (clip, what) in &report.trimmed_channels {
+                println!("  clip {clip}: keys before time 0 dropped (a key at 0 exists, nothing sampled changes): {what}");
+            }
+            for (clip, what) in &report.dropped_channels {
+                println!("  clip {clip}: channel left out: {what}");
+            }
+            if !report.names_driving_several_nodes.is_empty() {
+                println!(
+                    "  names that clips drive on several nodes: {}",
+                    report.names_driving_several_nodes.join(", ")
+                );
             }
             if let Some(t) = &report.tint {
                 println!("  texture tinted with gradient {t}");
@@ -569,6 +581,15 @@ fn run_bridge(cmd: Cmd, path: &std::path::Path) -> Result<()> {
                             .map(|t| format!(", tinted {t}"))
                             .unwrap_or_default()
                     );
+                    if let Some(t) = &a.tint_not_applied {
+                        println!("      gradient not applied, worn as it is: {t}");
+                    }
+                    if !a.name_collisions.is_empty() {
+                        println!(
+                            "      nodes named like earlier ones (kept, clips drive all): {}",
+                            a.name_collisions.join(", ")
+                        );
+                    }
                     if !a.bare_offset_pieces.is_empty() {
                         println!(
                             "      pieces left out, body node is a bare pivot with a shape offset: {}",
@@ -651,9 +672,7 @@ fn cmd_check_bridge(hy: &hytale_unpack::bridge::Hytale, scenes: Option<f64>) -> 
     let mut fails: Vec<String> = Vec::new();
     let mut clips = 0usize;
     let mut instances = 0u64;
-    let (mut with_attachments, mut worn, mut pieces, mut unmatched, mut with_left_out, mut bare) =
-        (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
-    let mut left_out = std::collections::BTreeMap::<&str, u64>::new();
+    let mut tally = std::collections::BTreeMap::<&str, u64>::new();
     let mut unresolved = std::collections::BTreeMap::<String, u64>::new();
     let names: Vec<String> = hy.assets().names().map(String::from).collect();
     let mut n = 0;
@@ -704,35 +723,72 @@ fn cmd_check_bridge(hy: &hytale_unpack::bridge::Hytale, scenes: Option<f64>) -> 
         } else {
             hy.load_animated_report(id).and_then(|(am, r)| {
                 clips += r.clips;
+                let mut add = |k: &'static str, n: usize| *tally.entry(k).or_default() += n as u64;
+                add("clips skipped whole", r.skipped_clips.len());
+                add(
+                    "channels trimmed (keys before 0 dropped)",
+                    r.trimmed_channels.len(),
+                );
+                add("channels left out of a kept clip", r.dropped_channels.len());
                 if !r.attachments.is_empty() {
-                    with_attachments += 1;
-                    worn += r.attachments.len() as u64;
-                    pieces += r.attachments.iter().map(|a| a.pieces as u64).sum::<u64>();
-                    unmatched += r
-                        .attachments
-                        .iter()
-                        .map(|a| a.unmatched_pieces.len() as u64)
-                        .sum::<u64>();
-                    bare += r
-                        .attachments
-                        .iter()
-                        .map(|a| a.bare_offset_pieces.len() as u64)
-                        .sum::<u64>();
+                    add("models wearing attachments", 1);
+                    add("attachments worn", r.attachments.len());
+                    let sum = |f: &dyn Fn(&hytale_unpack::bridge::AttachmentNote) -> usize| {
+                        r.attachments.iter().map(f).sum::<usize>()
+                    };
+                    add("pieces merged", sum(&|a| a.pieces));
+                    add(
+                        "merged pieces with an orientation (not used)",
+                        sum(&|a| a.rotated_pieces),
+                    );
+                    add(
+                        "merged pieces with a shape offset (not used)",
+                        sum(&|a| a.offset_pieces),
+                    );
+                    add(
+                        "pieces with no node of that name (worn attachments)",
+                        sum(&|a| a.unmatched_pieces.len()),
+                    );
+                    add(
+                        "pieces on bare pivots with an offset (worn attachments)",
+                        sum(&|a| a.bare_offset_pieces.len()),
+                    );
+                    add(
+                        "attachments with a gradient not applied",
+                        sum(&|a| a.tint_not_applied.is_some() as usize),
+                    );
+                    let collide = sum(&|a| a.name_collision_nodes);
+                    if collide > 0 {
+                        add("models with nodes named like earlier ones", 1);
+                        add("such nodes", collide);
+                        let several: std::collections::BTreeSet<&String> =
+                            r.names_driving_several_nodes.iter().collect();
+                        if r.attachments
+                            .iter()
+                            .flat_map(|a| &a.name_collisions)
+                            .any(|n| several.contains(n))
+                        {
+                            add("of those models, a clip drives both nodes", 1);
+                        }
+                    }
+                }
+                if r.tint_not_applied.is_some() {
+                    add("entity gradients not applied", 1);
                 }
                 if !r.attachments_left_out.is_empty() {
-                    with_left_out += 1;
+                    add("models with attachment entries left out", 1);
                 }
                 for (what, why) in &r.attachments_left_out {
                     let key = if what.starts_with("RandomAttachmentSets/") {
-                        "random set (no pick in the data)"
+                        "entries left out: random set (no pick in the data)"
                     } else if why.contains("Weight") {
-                        "weighted entry"
+                        "entries left out: weighted"
                     } else if why.starts_with("adds nothing") {
-                        "entries that add nothing"
+                        "entries left out: add nothing"
                     } else {
-                        "other"
+                        "entries left out: other"
                     };
-                    *left_out.entry(key).or_default() += 1u64;
+                    add(key, 1);
                 }
                 Ok(am.validate()?)
             })
@@ -759,9 +815,9 @@ fn cmd_check_bridge(hy: &hytale_unpack::bridge::Hytale, scenes: Option<f64>) -> 
         println!("{label:<18} ok {:>6}  failed {:>5}", ok[i], failed[i]);
     }
     println!("{clips} clips built, {instances} scene instances");
-    println!(
-        "attachments: {with_attachments} models wear {worn} ({pieces} pieces merged, {unmatched} pieces with no node of that name and {bare} on bare pivots with an offset, in the attachments that are worn); {with_left_out} models have entries left out: {left_out:?}"
-    );
+    for (k, v) in &tally {
+        println!("{k}: {v}");
+    }
     if !unresolved.is_empty() {
         let total: u64 = unresolved.values().sum();
         println!(

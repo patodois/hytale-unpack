@@ -79,7 +79,7 @@ To build it yourself instead, see [Build and use](#build-and-use).
   model to a block (`Server/Item/Items`).
 - **Attachment**: a separate model worn by another one (eyes, hair, armour, hats), listed in an entity's
   `DefaultAttachments`. Its `isPiece` nodes merge into the same-named nodes of the body. See [Attachments](#attachments).
-- **Gradient**: a 256 x 16 PNG ramp from dark to light that tints a greyscale texture (`GradientSet` and `GradientId`
+- **Gradient**: a PNG ramp (256 wide, 13 to 16 rows) from dark to light that tints a greyscale texture (`GradientSet` and `GradientId`
   in the definitions).
 - **glTF**: the open 3D file format the exporter writes; any viewer or Blender opens it.
 - **[rewrite-bridge](https://github.com/patodois/rewrite-bridge)**: a small library with common model types, so
@@ -238,9 +238,14 @@ let house = hy.load_scene("Server/Prefabs/Npc/Kweebec/Autumn/Houses_Small/Kweebe
      `Fly/Fly`, `Fly/Fly@1.25` and `Fly/Fly@1.5`, and entries equal in file and speed get `#2`, `#3`;
   2. for a bare model `<dir>/<name>.blockymodel`, the plugin's rule: every `.blockyanim` in each folder of
      `<dir>/../Animations/`, named `<folder>/<file>`.
-  Clips address nodes by name and drive every node of that name; nodes the model lacks are skipped. A clip the
-  bridge would reject (a key at a negative time, say) is left out and named in `LoadReport::skipped_clips`, and
-  `model` prints it; the model still loads.
+  Clips address nodes by name and drive every node of that name; nodes the model lacks are skipped. The bridge
+  rejects a key before time 0, and one such key must not cost a whole clip: if the channel also has a key at exactly
+  0, the earlier keys are dropped (nothing sampled from 0 on changes: a rotation is interpolated between two keys,
+  and a smooth position or stretch only counts when its segment from 0 is linear, because Catmull-Rom tangents read
+  the key before); otherwise (no key at 0, or a smooth segment whose tangent used them) only that channel is left
+  out. Both are named in `LoadReport::trimmed_channels` and `dropped_channels`, which `model` prints, and a clip is
+  skipped whole (`skipped_clips`) only for a reason that is not one channel's. In the install this trims 2
+  channels (`Hair-B2` of `RestUp` on `Kweebec_Sapling_HardHat` and `_Razorleaf`) and skips no clip.
 - **Clips become channels:** `position` -> translation (rest + delta, metres), `orientation` -> rotation (rest *
   delta, spherical), `shapeStretch` -> scale of the `<name>/shape` node (stretch * delta). `smooth` position and
   stretch keyframes become cubic-spline keyframes reproducing the plugin's Catmull-Rom preview; rotations are always
@@ -287,10 +292,10 @@ are game content and are not in this repository.
 
 | rule | from | the icons |
 |---|---|---|
-| A piece (`isPiece: true`) goes onto the first node of the same name, at any depth of the attachment's tree, among the nodes that exist before it (the body, then earlier attachments) | plugin (`existing_groups.find`, the tooltip "attached to a node of the same name") | **confirmed**: worn vs bare body, IoU better in 89 of 99 models and worse in 8, mean 0.577 to 0.658, colour error lower in 69 and higher in 30 |
+| A piece (`isPiece: true`) goes onto the first node of the same name, at any depth of the attachment's tree, among the nodes that exist before it (the body, then earlier attachments) | plugin (`existing_groups.find`, and a tooltip saying that a piece attaches to the node with the same name) | **confirmed**: worn vs bare body, IoU better in 89 of 99 models and worse in 8, mean 0.577 to 0.658, colour error lower in 69 and higher in 30 |
 | The piece's children hang from that node, at their own position plus that node's shape offset (the rule for any parent) | plugin, and the crate's general hierarchy rule | **confirmed together with the rule above**: the alternative that keeps the pieces as ordinary nodes at their own place scores worse (mean IoU 0.602; better in 77 models, worse in 20, colour error 87 to 12) |
 | The piece's own position is not used | the data: the face quad of `Player_Face_Detached` is authored 20 px below a `Head` piece at y 79, the body's head pivot is at 87, and it lands on the head box's front only on the body's node | **confirmed** by the same comparison |
-| The piece's own orientation and shape offset are not used | plugin only (its code zeroes the rotation of a piece and the offset of its children, and a comment there saying the rotation matters for the model on its own but not once attached). 439 of the 2,060 worn pieces are rotated, 577 have an offset | **not confirmed**: on the 56 models with rotated pieces that have children, the best of five cameras gives mean IoU 0.758 ignoring the rotation and 0.761 applying it (better in 19, worse in 28; colour error lower in 34, higher in 16): the icons cannot tell the two apart. Kept because the plugin says so; this is the one rule resting on the plugin alone |
+| The piece's own orientation and shape offset are not used | plugin only (its code zeroes the rotation of a piece and the offset of its children, and a comment there saying the rotation matters for the model on its own but not once attached). of the 1,888 pieces merged, 429 are rotated and 560 have an offset of their own (of all 2,059 pieces in the entries that are worn or tried, 439 are rotated) | **not confirmed**: on the 56 models with rotated pieces that have children, the best of five cameras gives mean IoU 0.758 ignoring the rotation and 0.761 applying it (better in 19, worse in 28; colour error lower in 34, higher in 16): the icons cannot tell the two apart. Kept because the plugin says so; this is the one rule resting on the plugin alone |
 | A non-piece node is added as it is; a root keeps its own position and orientation | plugin | not tested (12 such roots in the data) |
 | A piece with no node of that name, and what hangs below it, is left out | the data says no more; the plugin shows a loose group | not applicable |
 | A piece whose node is a bare pivot (shape type `none`) with a non-zero shape offset, and what hangs below it, is **left out** | the plugin takes the body's shape offset only when the node has a box or quad, this crate's general rule takes it always, and nothing decides: 18 pieces (the ear anchors of `Zombie`, `Zombie_Aberrant`, `Zombie_Aberrant_Small`, `Zombie_Burnt`, `Zombie_Frost` and `Zombie_Sand`; the eyebrow anchors of `Feran` and `Feran_Civilian`; `R-Thigh` of `Zombie_Aberrant_Small`'s `Shorty_Slim` and `Bone`) | the icon of the Zombie did not settle it |
@@ -300,8 +305,8 @@ are game content and are not in this repository.
   436 entity models list 778 entries: eyes, hair, armour, hats, weapons, back items. The player has five (face, ears,
   mouth, eyes, eyebrows).
 - **Which texture.** Each entry names its own texture. An entry with `GradientSet` / `GradientId` is tinted: the set
-  and id are looked up in `Cosmetics/CharacterCreator/GradientSets.json`, which gives a gradient PNG (a 256 x 16 ramp
-  from dark to light). **The mapping from texture to ramp is inferred, not stated by the data or the plugin** (the
+  and id are looked up in `Cosmetics/CharacterCreator/GradientSets.json`, which gives a gradient PNG (a ramp from
+  dark to light, 256 wide, 208 of the 212 files 16 rows high and 4 of them 13). **The mapping from texture to ramp is inferred, not stated by the data or the plugin** (the
   plugin's source says nothing about gradients): every grey texel (red = green = blue) takes the colour of the ramp at
   its brightness, column 0 to 255, and texels that are not grey are painted colours and stay. It was inferred from the
   files (a brightness ramp and a texture that is grey where it is meant to be coloured by the set) and checked by eye
@@ -309,6 +314,22 @@ are game content and are not in this repository.
   `_Gunner`, `_Striker` and `Zombie_Aberrant`); in the three skeletons the black hat and the red bandanas of the icons
   match the tinted render and not the grey one, and in `Zombie_Aberrant` the tinted piece is not visible. So 3
   icons confirm it; the whole-image colour score cannot see it (mean 0.352 tinted, 0.367 not).
+  - **Which row.** The gradient files are not 16 identical rows: of the 212 files listed in `GradientSets.json`, 163
+    have rows that differ from row 0 (by up to 12 levels in a channel) and 4 are 13 rows high. This crate reads row
+    0, its own choice, since nothing says which row (or an average) the game uses; rows are not averaged. A
+    gradient narrower or wider than 256 would be indexed in proportion, and none is.
+  - **Which texels.** "Grey" is exact equality of red, green and blue, with no tolerance: a texel that is off by a
+    level stays as painted. Of the 41 textures that get a gradient (39 attachment textures and the two player
+    textures) 13 have such near-grey texels (red, green and blue within 4 levels of each other but not equal): 1,278
+    in all, against 114,384 exactly grey ones. The most: `Santa_Jacket_Greyscale.png` 318 (of 6,368 opaque texels),
+    `SantaHat_Greyscale_Texture.png` 229, `Santa_Greyscale.png` 197, the two player textures 135 each. They keep their
+    own colour, which may show as speckles next to the tinted texels.
+  - **Half a pair.** 8 attachment entries give `GradientId` without `GradientSet` or the reverse: three beards of
+    `Warrior_Quest`, `PonyTail` and `Eyebrows_Medium` of `PlayerTestModel_G`, `Eyebrows_Medium` and `MediumCurly` of
+    `NPC_Elf`, and `HeavyBoots_Single` of `NPC_Sound_Shoe` (the only one with a `GradientSet` and no `GradientId`). The missing half is not inferred: the model is worn with its
+    texture as it is, and `AttachmentNote::tint_not_applied` says so (the same field says it when the pair names a
+    gradient that `GradientSets.json` does not have, and `LoadReport::tint_not_applied` does for the entity's own
+    gradient). `model` prints both.
 - **The entity's own gradient** (`GradientSet` / `GradientId` next to `Texture` in the definition) tints the entity's
   texture **only where the data pairs the two**, which is how every other record with a gradient is written (a
   cosmetic's `GreyscaleTexture` and `GradientSet`, an attachment's `Texture` and `GradientSet`, in one object): when
@@ -321,6 +342,12 @@ are game content and are not in this repository.
   in colour (the Trork, the skeletons, the Kweebecs...) and nothing to lose; **`NPC_Elf` is the one with a greyscale
   texture** (the player's, restated) and no restated gradient, so it stays grey. None of the 7 has an icon, so this
   rule is supported by the data's pairing only, not by the icons.
+- **Names that repeat.** An attachment's node can have the name of a node that is already there (the body's, or
+  an earlier attachment's): 528 nodes in 61 of the 179 models, listed in `AttachmentNote::name_collisions`. Nothing
+  is renamed or merged, because neither the data nor the plugin defines what a repeated name means; a clip that
+  names it drives every node of that name, as it does for the names that repeat inside one model file. In 12 of the
+  61 models a clip does name such a node, so it moves both the body's and the attachment's (`check-bridge` counts
+  them).
 - **How many.** 179 of the 436 entity models wear at least one attachment (710 attachments, 1,888 `isPiece` nodes
   merged into body nodes). Each attachment brings its own material and image.
 - **Left out, and why** (all listed in `LoadReport::attachments_left_out`, which `model` prints):
@@ -332,13 +359,16 @@ are game content and are not in this repository.
     are `R-Attachment` (46), `Origin_Projectile` (11) or `L-Attachment` (1) with no node of that name in the body,
     and 9 whose pieces sit on bare pivots with an offset (above). The plugin shows an unmatched piece as a loose
     group; the data says no more.
-  - 24 more unmatched pieces inside worn attachments, mostly the two anchors of the optional ear accessories
-    (`R-Ear-EarAccessory`, `L-Ear-EarAccessory`) in `Ears1`; they and what hangs below them are not added.
+  - 24 more unmatched pieces inside worn attachments, all of them the two anchors of the optional ear accessories
+    (`R-Ear-EarAccessory`, `L-Ear-EarAccessory`) in `Ears1` on 12 models; they and what hangs below them are not
+    added.
   - The player's *chosen* hair, clothes, armour and capes (`Cosmetics/CharacterCreator/*.json`, 590 parts
     for the player to pick from) and equipped armour items: no data says who wears what, so nothing is composed.
     The parts load as bare models as before. The same goes for items held in a hand (`R-Attachment`), which have
     no definition that names a wearer.
   - A piece's own shape is not drawn (none in the data has one).
+  - An attachment whose numbers are not finite once built (a position that overflows, say) is taken back out whole
+    and left out with the reason, so one bad attachment cannot fail the entity (none in the data).
 
 `hytale-unpack model <entity> --no-attachments` writes the bare body; `Hytale::load_animated_with(id, false)` does the
 same from code. Eight NPCs were also put next to their icons by eye, and the player (which has none) was checked
@@ -371,7 +401,7 @@ table of warnings, which come from the game's data or from what is left out, not
 | `geometry.degenerate_triangles` | 129 | 20 | triangles with no area: boxes of zero thickness in hair and costume pieces and a few bones |
 | `scale.height_out_of_range` | 103 | 103 | under 0.2 m high: small pieces (eyebrows, shoes, gloves, a rattle) |
 | `scene.empty` | 50 | 50 | prefabs whose cells are all `Empty` (they carve holes in terrain, e.g. `Klops_Basalt_Cave_001`) |
-| `front.not_plus_z` | 50 | 48 | node names such as `Front`, `Nose` or `Eye` that point along +X or -X (24 of the assets are prefabs, i.e. block models inside them); the data does not say which way a block faces, so they are left as they are |
+| `front.not_plus_z` | 51 | 49 | node names such as `Front`, `Nose` or `Eye` that point along +X or -X (24 of the assets are prefabs, i.e. block models inside them); the data does not say which way a block faces, so they are left as they are. One more than before attachments: `Zombie_Aberrant` now wears its big eyes (`L-Eye-Big`, `R-Eye-Big`), which the checker finds facing -X |
 | `orientation.not_upright` | 25 | 25 | flat pieces (ears, earrings, eyebrows, bracers) that are wider than tall |
 | `scale.too_small` | 2 | 2 | the two earring models |
 | `geometry.no_vertices` | 1 | 1 | `Common/NPC/MISC/Empty.blockymodel`, an empty model on purpose |
@@ -421,14 +451,12 @@ Used to check by eye (exported glTF files and renders are game content and are n
 Prefab versions: all `version 8` / `blockIdVersion 11`. Block `rotation` values seen: 1 to 11 only. Two clips have
 a keyframe past their `duration` (noted, not an error). **Peak RSS 79 MB, about 5 s** (`/usr/bin/time -l`: 79 MB).
 
-`check-bridge --scenes 30` loads all 436 entity models with a model (69,321 clips built), all 2,830 bare models,
+`check-bridge --scenes 30` loads all 436 entity models with a model (69,323 clips built), all 2,830 bare models,
 all 2,956 block items and all 7,828 prefabs as scenes (14.75 million instances), validating each: 0 failures,
 no unresolved block names. Peak RSS 300 to 390 MB (the 23 MB prefab dominates), about 25 s. It also prints the
 attachment tally: 179 models wear 710 attachments (1,888 pieces merged); 106 models have entries left out (117
-random sets, 1 weighted entry, 67 entries that add nothing). Two clips fewer than before
-attachments (`RestUp` of `Kweebec_Sapling_HardHat` and `_Razorleaf`): their `Hair-B2` keyframe at a negative time
-now finds its node (the hair attachment) and the bridge rejects the clip, which is left out and named in
-`LoadReport::skipped_clips` as before.
+random sets, 1 weighted entry, 67 entries that add nothing), and counts the clips skipped (0), the channels
+trimmed (2) and the channels left out of a kept clip (0).
 
 ## What is left out
 

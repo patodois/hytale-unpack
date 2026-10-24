@@ -152,6 +152,19 @@ pub struct AttachReport {
     /// box or quad, and the data does not say what the game does for a bare pivot with an offset,
     /// so these and everything below them are left out
     pub bare_offset: Vec<String>,
+    /// Merged pieces whose own orientation is not the identity (ignored, like their position)
+    pub rotated_pieces: usize,
+    /// Merged pieces with a non-zero shape offset of their own (ignored)
+    pub offset_pieces: usize,
+    /// Names of added nodes that an earlier node (the body or an earlier attachment) already has.
+    /// Nothing is renamed or merged: a clip that names such a node drives all of them, as it does
+    /// for any name that repeats in a model.
+    pub name_collisions: Vec<String>,
+    /// How many added nodes that is (names can repeat)
+    pub name_collision_nodes: usize,
+    /// Set when what the attachment added was not finite (a number so large that a position
+    /// overflowed, say): everything it added was taken back out, so the entity still validates
+    pub problem: Option<String>,
 }
 
 impl Rig {
@@ -168,6 +181,9 @@ impl Rig {
     ///   decides between them;
     /// - every other node is added as it is; a root keeps its own position and orientation.
     ///
+    /// If anything the attachment adds is not finite (a position that overflows), all of it is
+    /// taken back out and [`AttachReport::problem`] says why.
+    ///
     /// The attachment is drawn with `texture` in materials of its own (the base's textures are
     /// not touched). `bm` must use the same pixels per unit as the base model, because rest
     /// positions are kept in pixels; the caller checks.
@@ -179,6 +195,7 @@ impl Rig {
     ) -> AttachReport {
         let start = self.model.nodes.len();
         let meshes = self.model.meshes.len();
+        let materials = self.model.materials.len();
         let mut variants = HashMap::new();
         let mut ctx = Ctx {
             model: &mut self.model,
@@ -193,20 +210,69 @@ impl Rig {
                 pieces: 0,
                 unmatched: Vec::new(),
                 bare_offset: Vec::new(),
+                rotated_pieces: 0,
+                offset_pieces: 0,
+                name_collisions: Vec::new(),
             }),
         };
         for n in &bm.nodes {
             walk(&mut ctx, n, None, V3::ZERO);
         }
         let st = ctx.attach.take().unwrap();
+        let problem = non_finite(&self.model, start, meshes);
+        if problem.is_some() {
+            self.model.nodes.truncate(start);
+            self.model.meshes.truncate(meshes);
+            self.model.materials.truncate(materials);
+            self.by_name.retain(|_, v| {
+                v.retain(|r| r.pivot < start);
+                !v.is_empty()
+            });
+        }
+        let added = self.model.nodes.len() - start;
         AttachReport {
             pieces: st.pieces,
-            nodes_added: self.model.nodes.len() - start,
+            nodes_added: added,
             meshes_added: self.model.meshes.len() - meshes,
+            problem,
             unmatched: st.unmatched,
             bare_offset: st.bare_offset,
+            rotated_pieces: st.rotated_pieces,
+            offset_pieces: st.offset_pieces,
+            name_collision_nodes: st.name_collisions.len(),
+            name_collisions: {
+                let mut v = st.name_collisions;
+                v.sort();
+                v.dedup();
+                v
+            },
         }
     }
+}
+
+/// The first thing in the nodes from `nodes` on or the meshes from `meshes` on that is not a
+/// finite number, described.
+fn non_finite(m: &Model, nodes: usize, meshes: usize) -> Option<String> {
+    let bad = |v: &[f32]| v.iter().any(|c| !c.is_finite());
+    for n in &m.nodes[nodes..] {
+        if bad(&n.translation) || bad(&n.rotation) || bad(&n.scale) {
+            return Some(format!(
+                "node {} has a transform that is not finite",
+                n.name
+            ));
+        }
+    }
+    for mesh in &m.meshes[meshes..] {
+        let pos = mesh.positions.iter().any(|p| bad(p));
+        let norm = mesh.normals.iter().any(|p| bad(p));
+        if pos || norm || mesh.uvs.iter().any(|p| bad(p)) {
+            return Some(format!(
+                "mesh {} has a vertex that is not finite",
+                mesh.name
+            ));
+        }
+    }
+    None
 }
 
 struct AttachState {
@@ -215,6 +281,9 @@ struct AttachState {
     pieces: usize,
     unmatched: Vec<String>,
     bare_offset: Vec<String>,
+    rotated_pieces: usize,
+    offset_pieces: usize,
+    name_collisions: Vec<String>,
 }
 
 struct Ctx<'a> {
@@ -242,6 +311,9 @@ fn walk(c: &mut Ctx, n: &crate::blockymodel::Node, parent: Option<usize>, parent
                 }
                 Some(base) => {
                     att.pieces += 1;
+                    let q = qnorm(n.orientation.arr());
+                    att.rotated_pieces += (1.0 - q[3].abs() > 1e-4) as usize;
+                    att.offset_pieces += (n.shape.offset.arr() != [0.0; 3]) as usize;
                     let off = V3 {
                         x: base.offset[0],
                         y: base.offset[1],
@@ -254,6 +326,14 @@ fn walk(c: &mut Ctx, n: &crate::blockymodel::Node, parent: Option<usize>, parent
                 None => att.unmatched.push(n.name.clone()),
             }
             return;
+        }
+    }
+    if let Some(att) = c.attach.as_mut() {
+        if c.by_name
+            .get(&n.name)
+            .is_some_and(|v| v.iter().any(|r| r.pivot < att.before))
+        {
+            att.name_collisions.push(n.name.clone());
         }
     }
     let s = c.scale;
@@ -352,6 +432,17 @@ fn walk(c: &mut Ctx, n: &crate::blockymodel::Node, parent: Option<usize>, parent
 pub struct ClipReport {
     /// Node names in the clip that the model does not have
     pub missing_nodes: Vec<String>,
+    /// Channels that had keys before time 0 and also a key at time 0: the earlier keys were
+    /// dropped, which changes nothing sampled from 0 on (for a smooth position or stretch it is
+    /// only done when the segment after 0 is linear, so that no tangent depended on them). As
+    /// `"<node> <property>: <n> keys"`.
+    pub trimmed_channels: Vec<String>,
+    /// Channels that had keys before time 0 and could not be trimmed that way (no key at 0, or a
+    /// smooth segment whose tangent used them), or a key that is not a finite time: the channel
+    /// is left out, the rest of the clip stays. As `"<node> <property>: <why>"`.
+    pub dropped_channels: Vec<String>,
+    /// Names in the clip that more than one node of the model has (all of them are driven)
+    pub multi_node_names: Vec<String>,
     pub dropped_visible_keys: usize,
     pub dropped_uv_keys: usize,
 }
@@ -360,6 +451,44 @@ struct Track {
     t: f32,
     v: Vec<f32>,
     smooth: bool,
+}
+
+/// What to do with keys before time 0, which the bridge does not accept.
+enum Early {
+    /// Nothing before 0
+    None(Vec<Track>),
+    /// Dropped, with their number: the sampled curve from 0 on is unchanged
+    Trimmed(Vec<Track>, usize),
+    /// The channel cannot be kept
+    Drop(String),
+}
+
+/// Keys before time 0 can be dropped without changing what is sampled in `[0, duration]` when a
+/// key sits at exactly 0 and the first segment from 0 does not use them. A rotation is always
+/// interpolated spherically between two keys, so it never does; a position or stretch does when
+/// the segment is smooth (its Catmull-Rom tangent at key 0 reads the key before).
+fn early_keys(mut tr: Vec<Track>, spherical: bool) -> Early {
+    if tr.iter().any(|k| !k.t.is_finite()) {
+        return Early::Drop("a key time is not finite".to_string());
+    }
+    tr.sort_by(|a, b| a.t.total_cmp(&b.t));
+    let early = tr.iter().take_while(|k| k.t < 0.0).count();
+    if early == 0 {
+        return Early::None(tr);
+    }
+    if tr.get(early).is_none_or(|k| k.t != 0.0) {
+        return Early::Drop(format!("{early} keys before time 0 and none at 0"));
+    }
+    let smooth_from_zero = tr
+        .get(early + 1)
+        .is_some_and(|next| tr[early].smooth || next.smooth);
+    if !spherical && smooth_from_zero {
+        return Early::Drop(format!(
+            "{early} keys before time 0, and the smooth segment from 0 would change without them"
+        ));
+    }
+    tr.drain(..early);
+    Early::Trimmed(tr, early)
 }
 
 fn dedupe(mut tr: Vec<Track>) -> Vec<Track> {
@@ -469,6 +598,42 @@ fn smooth_of<T>(k: &Key<T>) -> bool {
     k.smooth()
 }
 
+/// Adds a translation or scale channel, after dealing with keys before time 0.
+fn push_vec3(
+    out: &mut Vec<Channel>,
+    report: &mut ClipReport,
+    label: &str,
+    node: usize,
+    target: Target,
+    tr: Vec<Track>,
+) {
+    match early_keys(tr, false) {
+        Early::None(tr) => out.extend(vec3_channel(node, target, tr)),
+        Early::Trimmed(tr, n) => {
+            report.trimmed_channels.push(format!("{label}: {n} keys"));
+            out.extend(vec3_channel(node, target, tr));
+        }
+        Early::Drop(why) => report.dropped_channels.push(format!("{label}: {why}")),
+    }
+}
+
+fn push_rotation(
+    out: &mut Vec<Channel>,
+    report: &mut ClipReport,
+    label: &str,
+    node: usize,
+    tr: Vec<Track>,
+) {
+    match early_keys(tr, true) {
+        Early::None(tr) => out.extend(rotation_channel(node, tr)),
+        Early::Trimmed(tr, n) => {
+            report.trimmed_channels.push(format!("{label}: {n} keys"));
+            out.extend(rotation_channel(node, tr));
+        }
+        Early::Drop(why) => report.dropped_channels.push(format!("{label}: {why}")),
+    }
+}
+
 /// Converts a clip for a rig. Names the clip `name`.
 pub fn build_clip(rig: &Rig, anim: &BlockyAnim, name: &str) -> (Animation, ClipReport) {
     let s = rig.scale;
@@ -480,6 +645,9 @@ pub fn build_clip(rig: &Rig, anim: &BlockyAnim, name: &str) -> (Animation, ClipR
             report.missing_nodes.push(node_name.clone());
             continue;
         };
+        if targets.len() > 1 {
+            report.multi_node_names.push(node_name.clone());
+        }
         report.dropped_visible_keys += na.shape_visible.len();
         report.dropped_uv_keys += na.shape_uv_offset.len();
         for rn in targets {
@@ -497,7 +665,14 @@ pub fn build_clip(rig: &Rig, anim: &BlockyAnim, name: &str) -> (Animation, ClipR
                         smooth: smooth_of(k),
                     })
                     .collect();
-                channels.extend(vec3_channel(rn.pivot, Target::Translation, tr));
+                push_vec3(
+                    &mut channels,
+                    &mut report,
+                    &format!("{node_name} position"),
+                    rn.pivot,
+                    Target::Translation,
+                    tr,
+                );
             }
             if !na.orientation.is_empty() {
                 let tr = na
@@ -509,7 +684,13 @@ pub fn build_clip(rig: &Rig, anim: &BlockyAnim, name: &str) -> (Animation, ClipR
                         smooth: smooth_of(k),
                     })
                     .collect();
-                channels.extend(rotation_channel(rn.pivot, tr));
+                push_rotation(
+                    &mut channels,
+                    &mut report,
+                    &format!("{node_name} orientation"),
+                    rn.pivot,
+                    tr,
+                );
             }
             if let (Some((shape, stretch)), false) = (rn.shape, na.shape_stretch.is_empty()) {
                 let tr = na
@@ -525,7 +706,14 @@ pub fn build_clip(rig: &Rig, anim: &BlockyAnim, name: &str) -> (Animation, ClipR
                         smooth: smooth_of(k),
                     })
                     .collect();
-                channels.extend(vec3_channel(shape, Target::Scale, tr));
+                push_vec3(
+                    &mut channels,
+                    &mut report,
+                    &format!("{node_name} shapeStretch"),
+                    shape,
+                    Target::Scale,
+                    tr,
+                );
             }
         }
     }
@@ -536,6 +724,8 @@ pub fn build_clip(rig: &Rig, anim: &BlockyAnim, name: &str) -> (Animation, ClipR
     }
     report.missing_nodes.sort();
     report.missing_nodes.dedup();
+    report.multi_node_names.sort();
+    report.multi_node_names.dedup();
     (
         Animation {
             name: name.to_string(),
@@ -826,5 +1016,128 @@ mod tests {
         assert_eq!(clip.channels[0].node, r.by_name["Face"][0].pivot);
         // rest (0, 0, 8) px, plus 64 px up, in metres
         assert_eq!(&clip.channels[0].values[3..6], [0.0, 1.0, 8.0 / 64.0]);
+    }
+
+    // ---- keys before time 0 ----
+
+    fn trk(t: f32, smooth: bool) -> Track {
+        Track {
+            t,
+            v: vec![0.0; 3],
+            smooth,
+        }
+    }
+
+    #[test]
+    fn early_keys_are_trimmed_only_when_nothing_from_zero_on_depends_on_them() {
+        // a key at 0 and a linear segment after it: trimmed
+        let Early::Trimmed(tr, n) = early_keys(
+            vec![trk(-0.8, false), trk(0.0, false), trk(0.5, false)],
+            false,
+        ) else {
+            panic!("not trimmed")
+        };
+        assert_eq!((tr.len(), n, tr[0].t), (2, 1, 0.0));
+        // a rotation is spherical between two keys, so a smooth flag changes nothing
+        assert!(matches!(
+            early_keys(vec![trk(-0.8, true), trk(0.0, true), trk(0.5, true)], true),
+            Early::Trimmed(..)
+        ));
+        // a smooth position segment from 0 reads the key before it (Catmull-Rom): not trimmed
+        assert!(matches!(
+            early_keys(
+                vec![trk(-0.8, false), trk(0.0, true), trk(0.5, false)],
+                false
+            ),
+            Early::Drop(_)
+        ));
+        // ... unless there is nothing after 0 to interpolate towards
+        assert!(matches!(
+            early_keys(vec![trk(-0.8, true), trk(0.0, true)], false),
+            Early::Trimmed(..)
+        ));
+        // no key at 0: nothing says what is sampled at 0 without the early key
+        assert!(matches!(
+            early_keys(vec![trk(-0.8, false), trk(0.5, false)], false),
+            Early::Drop(_)
+        ));
+        // keys given out of order are sorted first; a time that is not finite drops the channel
+        assert!(matches!(
+            early_keys(
+                vec![trk(0.5, false), trk(-0.8, false), trk(0.0, false)],
+                false
+            ),
+            Early::Trimmed(..)
+        ));
+        assert!(matches!(
+            early_keys(vec![trk(f32::NAN, false), trk(0.0, false)], false),
+            Early::Drop(_)
+        ));
+        assert!(matches!(
+            early_keys(vec![trk(0.0, false), trk(0.5, false)], false),
+            Early::None(_)
+        ));
+    }
+
+    // ---- attachments: what is reported, and what is taken back ----
+
+    #[test]
+    fn pieces_with_an_orientation_or_an_offset_are_counted_and_name_collisions_listed() {
+        let mut r = body();
+        let rep = r.attach(&BlockyModel::parse(WORN.as_bytes()).unwrap(), None, "worn");
+        // `Head` piece: rotated 90 degrees about y, offset (7, 7, 7); `Foot` piece: neither
+        assert_eq!((rep.rotated_pieces, rep.offset_pieces), (1, 1));
+        // no added node is named like a body node
+        assert!(rep.name_collisions.is_empty());
+        // a second attachment with a plain root named `Strap` and one named `Head`
+        let again = r#"{"nodes":[
+          {"id":"1","name":"Strap","position":{"x":0,"y":0,"z":0},"shape":{"type":"none"}},
+          {"id":"2","name":"Strap","position":{"x":0,"y":0,"z":0},"shape":{"type":"none"}},
+          {"id":"3","name":"Head","position":{"x":0,"y":0,"z":0},"shape":{"type":"none"}}]}"#;
+        let rep = r.attach(
+            &BlockyModel::parse(again.as_bytes()).unwrap(),
+            None,
+            "again",
+        );
+        assert_eq!(rep.name_collisions, ["Head", "Strap"]);
+        // every added node whose name an earlier node has counts: both `Strap`s (the earlier
+        // one is the first attachment's) and `Head`
+        assert_eq!(rep.name_collision_nodes, 3);
+        // nothing is renamed or merged: the name now holds several nodes, which a clip drives all of
+        assert_eq!(r.by_name["Strap"].len(), 3);
+        assert_eq!(r.by_name["Head"].len(), 3);
+    }
+
+    #[test]
+    fn an_attachment_that_overflows_is_taken_back_out_whole() {
+        let mut r = body();
+        let (nodes, meshes, materials) = (
+            r.model.nodes.len(),
+            r.model.meshes.len(),
+            r.model.materials.len(),
+        );
+        let names: Vec<usize> = r.by_name.values().map(Vec::len).collect();
+        // 3e38 + 3e38 overflows f32: the child of a node with that offset is at infinity
+        let big = r#"{"nodes":[
+          {"id":"1","name":"Far","position":{"x":0,"y":0,"z":0},
+           "shape":{"type":"none","offset":{"x":3e38,"y":0,"z":0}},
+           "children":[{"id":"2","name":"Child","position":{"x":3e38,"y":0,"z":0},"shape":{"type":"none"}}]}]}"#;
+        let rep = r.attach(
+            &BlockyModel::parse(big.as_bytes()).unwrap(),
+            Some(&tex(8, 8)),
+            "big",
+        );
+        assert!(rep.problem.unwrap().contains("not finite"));
+        assert_eq!(rep.nodes_added, 0);
+        assert_eq!(r.model.nodes.len(), nodes);
+        assert_eq!(r.model.meshes.len(), meshes);
+        assert_eq!(r.model.materials.len(), materials);
+        assert!(!r.by_name.contains_key("Child") && !r.by_name.contains_key("Far"));
+        let mut after: Vec<usize> = r.by_name.values().map(Vec::len).collect();
+        let mut before = names;
+        before.sort();
+        after.sort();
+        assert_eq!(before, after);
+        r.model.validate().unwrap();
     }
 }

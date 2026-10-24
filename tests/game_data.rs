@@ -562,6 +562,12 @@ fn the_body_without_attachments_is_what_loaded_before() {
     // the body's own nodes and meshes come first and are unchanged
     assert_eq!(with.model.nodes[..57], bare.model.nodes[..]);
     assert_eq!(with.model.meshes[..21], bare.model.meshes[..]);
+    // and its materials: the bare body's one material (its texture, tinted by the entity's own
+    // gradient where the data pairs them, with or without attachments) comes first and is equal
+    let n = bare.model.materials.len();
+    assert_eq!(n, 1);
+    assert_eq!(with.model.materials[..n], bare.model.materials[..]);
+    assert!(with.model.materials.len() > n);
 }
 
 #[test]
@@ -713,4 +719,100 @@ fn every_entity_with_attachments_loads_and_validates() {
     assert!(wearing >= 179, "{wearing}");
     assert!(worn >= 710, "{worn}");
     assert!(random >= 44, "{random}");
+}
+
+#[test]
+fn the_rest_up_clip_of_the_hard_hat_kweebec_keeps_everything_it_can() {
+    let hy = need!();
+    for id in [
+        "Server/Models/Intelligent/Kweebec/Kweebec_Sapling_HardHat.json",
+        "Server/Models/Intelligent/Kweebec/Kweebec_Sapling_Razorleaf.json",
+    ] {
+        let (am, report) = hy.load_animated_report(id).unwrap();
+        am.validate().unwrap();
+        // the hair's `Hair-B2` has an orientation key at -49 frames and one at 0: trimmed
+        assert!(
+            report.skipped_clips.is_empty(),
+            "{:?}",
+            report.skipped_clips
+        );
+        assert_eq!(
+            report.trimmed_channels,
+            [(
+                "RestUp".to_string(),
+                "Hair-B2 orientation: 1 keys".to_string()
+            )],
+            "{id}"
+        );
+        assert!(report.dropped_channels.is_empty());
+        assert!(am.animations.iter().any(|a| a.name == "RestUp"));
+    }
+}
+
+#[test]
+fn eight_attachment_entries_have_half_a_gradient_pair() {
+    let hy = need!();
+    let mut half = Vec::new();
+    let mut paths: Vec<String> = hy.defs().model_paths().map(String::from).collect();
+    paths.sort();
+    for id in &paths {
+        let def = hy.defs().model_def(hy.assets(), id).unwrap();
+        if def.model.is_none() {
+            continue;
+        }
+        let (_, report) = hy.load_animated_report(id).unwrap();
+        for a in &report.attachments {
+            if let Some(why) = &a.tint_not_applied {
+                assert!(a.tint.is_none());
+                half.push((id.rsplit('/').next().unwrap().to_string(), why.clone()));
+            }
+        }
+    }
+    assert_eq!(half.len(), 8, "{half:?}");
+    assert!(
+        half.iter().all(|(_, why)| why.contains(" without a ")),
+        "{half:?}"
+    );
+    let models: std::collections::BTreeSet<_> = half.iter().map(|(m, _)| m.as_str()).collect();
+    assert_eq!(
+        models.into_iter().collect::<Vec<_>>(),
+        [
+            "NPC_Elf.json",
+            "NPC_Sound_Shoe.json",
+            "PlayerTestModel_G.json",
+            "Warrior_Quest.json"
+        ]
+    );
+}
+
+#[test]
+fn nodes_named_like_earlier_ones_are_listed_and_kept() {
+    let hy = need!();
+    let mut models = 0;
+    let mut nodes = 0;
+    let mut paths: Vec<String> = hy.defs().model_paths().map(String::from).collect();
+    paths.sort();
+    for id in &paths {
+        let def = hy.defs().model_def(hy.assets(), id).unwrap();
+        if def.model.is_none() {
+            continue;
+        }
+        let (am, report) = hy.load_animated_report(id).unwrap();
+        let n: usize = report
+            .attachments
+            .iter()
+            .map(|a| a.name_collision_nodes)
+            .sum();
+        if n > 0 {
+            models += 1;
+            nodes += n;
+            // kept, not merged: each listed name is carried by several nodes
+            for a in &report.attachments {
+                for name in &a.name_collisions {
+                    assert!(am.model.nodes.iter().filter(|x| &x.name == name).count() > 1);
+                }
+            }
+        }
+    }
+    assert_eq!((models, nodes), (61, 528));
 }

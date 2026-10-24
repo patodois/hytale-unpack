@@ -32,14 +32,15 @@
 //!
 //! `DefaultAttachments` lists the models worn by every instance of the entity (eyes, hair, armour,
 //! weapons, hats), each with its own texture. A model's `Parent` chain replaces the whole list, as
-//! it does for any array: 230 of the 436 entity models have a non-empty list after inheritance.
+//! it does for any array: 226 of the 436 entity models list at least one attachment with a model
+//! after inheritance (778 entries).
 //! `RandomAttachmentSets` names sets of alternatives (`"Fleece": {"Wool": {...}}`, an option `{}`
 //! meaning none) of which one is picked per instance; the data gives no pick, so they are only
 //! read, never composed. An entry with a `Weight` (a probability or a share) is in the same
 //! position. How the models are glued on is in [`crate::blockymodel`] ("Attachments").
 //!
 //! `GradientSet` and `GradientId` name a tint: `Cosmetics/CharacterCreator/GradientSets.json`
-//! lists every set with its gradients, each a path to a 256 x 16 PNG ([`GradientSets`]). The
+//! lists every set with its gradients, each a path to a PNG ramp, 256 wide and 13 to 16 rows high ([`GradientSets`]). The
 //! textures that go with a gradient are greyscale in the tinted regions; see [`crate::image::tint`].
 //! An entity's own gradient is applied to its texture only where the data pairs them, see
 //! [`ModelDef::gradient_paired`].
@@ -243,9 +244,13 @@ impl Defs {
     pub fn model_def(&self, assets: &Assets, path: &str) -> Result<ModelDef> {
         let v = self.resolve(assets, Family::Models, path, 0)?;
         let mut def = ModelDef::from_json(&v);
-        // which file of the Parent chain supplies each of the three keys
+        // which file of the Parent chain supplies each of the three keys; `resolve` above allows a
+        // chain of 33 files, and so does this walk: a longer one is an error there, never a gap here
         let mut cur = path.to_string();
-        for _ in 0..32 {
+        for depth in 0.. {
+            if depth > 32 {
+                bail!("{path}: Parent chain too deep");
+            }
             let own: Value = assets.read_json(&cur)?;
             for (key, slot) in [
                 ("Texture", &mut def.texture_from),
@@ -351,8 +356,13 @@ pub struct AttachmentDef {
     pub model: String,
     /// Relative to `Common/`
     pub texture: Option<String>,
-    pub gradient: Option<GradientRef>,
-    /// Present on weighted entries only
+    /// `GradientSet` as written, even when `GradientId` is missing
+    pub gradient_set: Option<String>,
+    /// `GradientId` as written, even when `GradientSet` is missing
+    pub gradient_id: Option<String>,
+    /// Whether the entry has a `Weight` key (of any type): weighted entries are not worn
+    pub weighted: bool,
+    /// The `Weight`, when it is a number
     pub weight: Option<f32>,
 }
 
@@ -363,9 +373,29 @@ impl AttachmentDef {
         Some(AttachmentDef {
             model: s("Model")?,
             texture: s("Texture"),
-            gradient: GradientRef::from_json(a),
+            gradient_set: s("GradientSet"),
+            gradient_id: s("GradientId"),
+            weighted: a.get("Weight").is_some(),
             weight: a.get("Weight").and_then(Value::as_f64).map(|x| x as f32),
         })
+    }
+
+    /// The gradient, when the entry names both halves. Half a pair is not completed: the missing
+    /// half is not inferred.
+    pub fn gradient(&self) -> Option<GradientRef> {
+        Some(GradientRef {
+            set: self.gradient_set.clone()?,
+            id: self.gradient_id.clone()?,
+        })
+    }
+
+    /// What is wrong with the entry's gradient keys: exactly one of the two is there.
+    pub fn half_gradient(&self) -> Option<String> {
+        match (&self.gradient_set, &self.gradient_id) {
+            (Some(s), None) => Some(format!("GradientSet {s} without a GradientId")),
+            (None, Some(i)) => Some(format!("GradientId {i} without a GradientSet")),
+            _ => None,
+        }
     }
 }
 
@@ -668,12 +698,48 @@ mod tests {
         let models: Vec<_> = d.attachments.iter().map(|a| a.model.as_str()).collect();
         assert_eq!(models, ["A.blockymodel", "B.blockymodel", "C.blockymodel"]);
         assert_eq!(d.attachments[0].texture.as_deref(), Some("A.png"));
-        assert_eq!(d.attachments[0].gradient.as_ref().unwrap().id, "Brown");
+        assert_eq!(d.attachments[0].gradient().unwrap().id, "Brown");
         assert_eq!(d.attachments[1].weight, Some(0.9));
         assert_eq!(d.attachments[2].texture, None);
         let fleece = &d.random_attachment_sets["Fleece"];
         assert_eq!(fleece["Wool"].as_ref().unwrap().model, "W.blockymodel");
         assert!(fleece["None"].is_none());
+    }
+
+    #[test]
+    fn half_a_gradient_pair_is_kept_as_written_and_not_completed() {
+        let v = json!({"DefaultAttachments": [
+            {"Model": "A.blockymodel", "GradientId": "Brown"},
+            {"Model": "B.blockymodel", "GradientSet": "Hair"},
+            {"Model": "C.blockymodel", "GradientSet": "Hair", "GradientId": "Brown"},
+            {"Model": "D.blockymodel"}]});
+        let a = ModelDef::from_json(&v).attachments;
+        assert_eq!(a[0].gradient(), None);
+        assert_eq!(a[0].gradient_id.as_deref(), Some("Brown"));
+        assert_eq!(
+            a[0].half_gradient().unwrap(),
+            "GradientId Brown without a GradientSet"
+        );
+        assert_eq!(
+            a[1].half_gradient().unwrap(),
+            "GradientSet Hair without a GradientId"
+        );
+        assert!(a[2].gradient().is_some() && a[2].half_gradient().is_none());
+        assert!(a[3].gradient().is_none() && a[3].half_gradient().is_none());
+    }
+
+    #[test]
+    fn a_weight_of_any_type_makes_an_entry_weighted() {
+        let v = json!({"DefaultAttachments": [
+            {"Model": "A.blockymodel", "Weight": 0.9},
+            {"Model": "B.blockymodel", "Weight": "heavy"},
+            {"Model": "C.blockymodel", "Weight": null},
+            {"Model": "D.blockymodel"}]});
+        let a = ModelDef::from_json(&v).attachments;
+        let w: Vec<bool> = a.iter().map(|a| a.weighted).collect();
+        assert_eq!(w, [true, true, true, false]);
+        assert_eq!(a[0].weight, Some(0.9));
+        assert_eq!(a[1].weight, None);
     }
 
     #[test]
