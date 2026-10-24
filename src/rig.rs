@@ -47,7 +47,7 @@ use rewrite_bridge::{
 };
 
 use crate::blockyanim::{BlockyAnim, Key, FPS};
-use crate::blockymodel::{shape_faces, BlockyModel, FACE_TRIANGLES, V3};
+use crate::blockymodel::{shape_faces, BlockyModel, ShapeType, FACE_TRIANGLES, V3};
 use crate::image::Rgba;
 
 pub fn to_image(img: &Rgba) -> Image {
@@ -71,6 +71,8 @@ pub struct RigNode {
     /// The shape's offset in pixels, which children are positioned from (whether or not the shape
     /// is drawn)
     pub offset: [f32; 3],
+    /// The node's shape is of type `none` (a bare pivot)
+    pub shape_none: bool,
 }
 
 pub struct Rig {
@@ -145,6 +147,11 @@ pub struct AttachReport {
     /// Names of `isPiece` nodes that no earlier node carries; they and everything below them are
     /// left out
     pub unmatched: Vec<String>,
+    /// Names of `isPiece` nodes whose node has no shape (type `none`) but a shape offset: the
+    /// reference plugin places a piece at a node's pivot plus its offset only when the node has a
+    /// box or quad, and the data does not say what the game does for a bare pivot with an offset,
+    /// so these and everything below them are left out
+    pub bare_offset: Vec<String>,
 }
 
 impl Rig {
@@ -156,7 +163,9 @@ impl Rig {
     ///   attachments), and its children hang from that node, positioned relative to its pivot plus
     ///   its shape offset like the children of any node. The piece's own position, orientation
     ///   and shape offset are not used. A piece with no such node, and everything below it, is
-    ///   left out;
+    ///   left out, and so is one whose node is a bare pivot (shape type `none`) with a non-zero
+    ///   shape offset, where the reference and this crate's general rule disagree and nothing
+    ///   decides between them;
     /// - every other node is added as it is; a root keeps its own position and orientation.
     ///
     /// The attachment is drawn with `texture` in materials of its own (the base's textures are
@@ -183,6 +192,7 @@ impl Rig {
                 before: start,
                 pieces: 0,
                 unmatched: Vec::new(),
+                bare_offset: Vec::new(),
             }),
         };
         for n in &bm.nodes {
@@ -194,6 +204,7 @@ impl Rig {
             nodes_added: self.model.nodes.len() - start,
             meshes_added: self.model.meshes.len() - meshes,
             unmatched: st.unmatched,
+            bare_offset: st.bare_offset,
         }
     }
 }
@@ -203,6 +214,7 @@ struct AttachState {
     before: usize,
     pieces: usize,
     unmatched: Vec<String>,
+    bare_offset: Vec<String>,
 }
 
 struct Ctx<'a> {
@@ -225,6 +237,9 @@ fn walk(c: &mut Ctx, n: &crate::blockymodel::Node, parent: Option<usize>, parent
                 .and_then(|v| v.iter().find(|r| r.pivot < att.before))
                 .cloned();
             match base {
+                Some(base) if base.shape_none && base.offset != [0.0; 3] => {
+                    att.bare_offset.push(n.name.clone());
+                }
                 Some(base) => {
                     att.pieces += 1;
                     let off = V3 {
@@ -325,6 +340,7 @@ fn walk(c: &mut Ctx, n: &crate::blockymodel::Node, parent: Option<usize>, parent
         rest_rot,
         shape,
         offset: sh.offset.arr(),
+        shape_none: sh.kind == ShapeType::None,
     });
     for ch in &n.children {
         walk(c, ch, Some(pivot), sh.offset);
@@ -649,8 +665,8 @@ mod tests {
 
     // ---- attachments ----
 
-    /// Head (pivot at y 20, its shape centred 6 above it) with an Eye child, a Hand, and a second
-    /// "Head" node further down the tree.
+    /// Head (pivot at y 20, its shape centred 6 above it), a bare `Hand` pivot with a shape offset,
+    /// a bare `Foot` pivot, and a second "Head" node further down the tree.
     const BODY: &str = r#"{"nodes":[
       {"id":"1","name":"Root","position":{"x":0,"y":0,"z":0},"shape":{"type":"none"},
        "children":[
@@ -658,11 +674,13 @@ mod tests {
           "shape":{"type":"box","offset":{"x":0,"y":6,"z":0},"settings":{"size":{"x":10,"y":12,"z":10}},
                    "textureLayout":{"front":{"offset":{"x":0,"y":0},"mirror":{"x":false,"y":false},"angle":0}}}},
          {"id":"3","name":"Hand","position":{"x":8,"y":10,"z":0},"shape":{"type":"none","offset":{"x":1,"y":2,"z":3}}},
-         {"id":"4","name":"Head","position":{"x":0,"y":-5,"z":0},"shape":{"type":"none"}}]}]}"#;
+         {"id":"4","name":"Head","position":{"x":0,"y":-5,"z":0},"shape":{"type":"none"}},
+         {"id":"5","name":"Foot","position":{"x":-8,"y":-10,"z":0},"shape":{"type":"none"}}]}]}"#;
 
-    /// Two pieces: `Head` (own position and rotation that must be ignored; its offset too) with a
-    /// quad child, and `Hand` nested under a plain node; `Nowhere` matches nothing; and a plain
-    /// root that keeps its own place.
+    /// Pieces: `Head` (own position and rotation that must be ignored; its offset too) with a quad
+    /// child; `Foot` and `Hand` nested under a plain node, the first on a bare pivot, the second
+    /// on a bare pivot with a shape offset (left out); `Nowhere` matches nothing; and a plain root
+    /// that keeps its own place.
     const WORN: &str = r#"{"nodes":[
       {"id":"1","name":"Head","position":{"x":99,"y":99,"z":99},"orientation":{"x":0,"y":0.707,"z":0,"w":0.707},
        "shape":{"type":"none","offset":{"x":7,"y":7,"z":7},"settings":{"isPiece":true}},
@@ -678,7 +696,10 @@ mod tests {
        "children":[
          {"id":"6","name":"Hand","position":{"x":50,"y":50,"z":50},
           "shape":{"type":"none","settings":{"isPiece":true}},
-          "children":[{"id":"7","name":"Ring","position":{"x":0,"y":-1,"z":0},"shape":{"type":"none"}}]}]}]}"#;
+          "children":[{"id":"7","name":"Ring","position":{"x":0,"y":-1,"z":0},"shape":{"type":"none"}}]},
+         {"id":"8","name":"Foot","position":{"x":50,"y":50,"z":50},
+          "shape":{"type":"none","settings":{"isPiece":true}},
+          "children":[{"id":"9","name":"Toe","position":{"x":0,"y":-1,"z":0},"shape":{"type":"none"}}]}]}]}"#;
 
     fn tex(w: u32, h: u32) -> Rgba {
         Rgba {
@@ -705,11 +726,14 @@ mod tests {
         r.model.validate().unwrap();
         assert_eq!(rep.pieces, 2);
         assert_eq!(rep.unmatched, ["Nowhere"]);
-        // Face, Face/shape, Strap, Ring: the pieces, `Nowhere` and `Lost` add nothing
+        assert_eq!(rep.bare_offset, ["Hand"]);
+        // Face, Face/shape, Strap, Toe: the pieces, `Nowhere`, `Hand` and what hangs below them
+        // add nothing
         assert_eq!(rep.nodes_added, 4);
         assert_eq!(r.model.nodes.len(), nodes + 4);
         assert_eq!(rep.meshes_added, 1);
         assert!(!r.by_name.contains_key("Lost"));
+        assert!(!r.by_name.contains_key("Ring"));
 
         // `Face` hangs from the first Head, at its position plus that node's shape offset (6),
         // whatever the piece's own position, rotation and offset say
@@ -720,12 +744,12 @@ mod tests {
         assert_eq!(face.rotation, [0.0, 0.0, 0.0, 1.0]);
         assert_eq!(r.by_name["Head"].len(), 2);
 
-        // `Ring` hangs from `Hand` (offset 1, 2, 3), not from `Strap`
-        let hand = r.by_name["Hand"][0].pivot;
-        let ring = &r.model.nodes[r.by_name["Ring"][0].pivot];
-        assert_eq!(ring.parent, Some(hand));
-        assert_eq!(ring.translation, [1.0 / 64.0, 1.0 / 64.0, 3.0 / 64.0]);
-        assert_eq!(r.by_name["Hand"].len(), 1);
+        // `Toe` hangs from `Foot`, not from `Strap`
+        let foot = r.by_name["Foot"][0].pivot;
+        let toe = &r.model.nodes[r.by_name["Toe"][0].pivot];
+        assert_eq!(toe.parent, Some(foot));
+        assert_eq!(toe.translation, [0.0, -1.0 / 64.0, 0.0]);
+        assert_eq!(r.by_name["Foot"].len(), 1);
     }
 
     #[test]

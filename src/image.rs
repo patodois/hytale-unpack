@@ -27,23 +27,6 @@ impl Rgba {
     pub fn has_alpha(&self) -> bool {
         self.data.as_chunks::<4>().0.iter().any(|p| p[3] != 255)
     }
-
-    /// The share (0 to 1) of the non-transparent texels whose red, green and blue are equal.
-    /// 0 when there are none.
-    pub fn grey_share(&self) -> f32 {
-        let (mut opaque, mut grey) = (0usize, 0usize);
-        for p in self.data.as_chunks::<4>().0 {
-            if p[3] != 0 {
-                opaque += 1;
-                grey += (p[0] == p[1] && p[1] == p[2]) as usize;
-            }
-        }
-        if opaque == 0 {
-            0.0
-        } else {
-            grey as f32 / opaque as f32
-        }
-    }
 }
 
 pub fn decode_png(bytes: &[u8]) -> Result<Rgba> {
@@ -103,8 +86,9 @@ pub fn decode_png(bytes: &[u8]) -> Result<Rgba> {
 /// blue differing) are painted colours and stay as they are: the textures mix both (the player's
 /// skin is grey and its underwear blue). The gradient has 16 identical rows; the first is read.
 ///
-/// The data does not describe this mapping; it is the reading that fits the files (a ramp to
-/// index by brightness) and it is checked against the game's own generated icons, see the README.
+/// The data does not describe this mapping. It is inferred from the files (a ramp to index by
+/// brightness) and was checked by eye against three of the game's own generated icons; see the
+/// README.
 pub fn tint(texture: &Rgba, gradient: &Rgba) -> Rgba {
     let mut out = texture.clone();
     if gradient.width == 0 || gradient.height == 0 {
@@ -172,25 +156,6 @@ mod tests {
         assert_eq!(&t.data[0..4], &[10, 0, 245, 200]);
         assert_eq!(&t.data[4..8], &[255, 0, 0, 255]);
         assert_eq!(&t.data[8..12], &[200, 100, 50, 255]);
-    }
-
-    #[test]
-    fn grey_share_counts_grey_among_the_non_transparent_texels() {
-        let tex = Rgba {
-            width: 4,
-            height: 1,
-            data: vec![
-                9, 9, 9, 255, 9, 9, 9, 128, 1, 2, 3, 255, // 2 grey, 1 colour
-                7, 7, 7, 0, // transparent: not counted
-            ],
-        };
-        assert!((tex.grey_share() - 2.0 / 3.0).abs() < 1e-6);
-        let none = Rgba {
-            width: 1,
-            height: 1,
-            data: vec![0, 0, 0, 0],
-        };
-        assert_eq!(none.grey_share(), 0.0);
     }
 
     #[test]

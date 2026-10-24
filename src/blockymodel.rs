@@ -84,7 +84,9 @@
 //! lists them under `DefaultAttachments` ([`crate::defs`]). A node with `shape.settings.isPiece:
 //! true` attaches to the node of the same name in the model it is worn on (the plugin's tooltip:
 //! "the node will be attached to a node of the same name when displayed as an attachment
-//! in-game"). What the plugin does with such a node, which is what this crate does
+//! in-game"). The plugin is hosted on its author's own account and carries the studio's copyright
+//! notice, but no official page confirms it as the studio's release; the README says which rules
+//! the game's icons confirm. What the plugin does with such a node, which is what this crate does
 //! (`Rig::attach` in `src/rig.rs`):
 //!
 //! - the piece is looked up by name among the nodes that exist already, the first in tree order
@@ -99,6 +101,9 @@
 //!   lands on the front of the head box: the head's offset (20 px) is added;
 //! - a node that is not a piece is an ordinary node of the attachment. A root keeps its own
 //!   position and orientation, relative to the model's origin;
+//! - a piece whose node is a bare pivot (shape type `none`) with a non-zero shape offset is left
+//!   out: the plugin takes the offset only for a node with a box or quad, the crate's general
+//!   rule for children takes it always, and nothing in the data or the game's icons decides;
 //! - a piece with no node of that name has nothing to attach to. The plugin shows it as a loose
 //!   group, the data says no more, and this crate leaves it and what hangs below it out (the
 //!   optional ear accessories' anchors; the held-item pieces `R-Attachment` of weapons worn by

@@ -550,6 +550,11 @@ fn run_bridge(cmd: Cmd, path: &std::path::Path) -> Result<()> {
             if let Some(t) = &report.tint {
                 println!("  texture tinted with gradient {t}");
             }
+            if let Some(t) = &report.tint_not_applied {
+                println!(
+                    "  gradient not applied to the texture (the data does not pair them): {t}"
+                );
+            }
             if !report.attachments.is_empty() {
                 println!("  attachments worn: {}", report.attachments.len());
                 for a in &report.attachments {
@@ -564,6 +569,12 @@ fn run_bridge(cmd: Cmd, path: &std::path::Path) -> Result<()> {
                             .map(|t| format!(", tinted {t}"))
                             .unwrap_or_default()
                     );
+                    if !a.bare_offset_pieces.is_empty() {
+                        println!(
+                            "      pieces left out, body node is a bare pivot with a shape offset: {}",
+                            a.bare_offset_pieces.join(", ")
+                        );
+                    }
                     if !a.unmatched_pieces.is_empty() {
                         println!(
                             "      pieces with no node of that name: {}",
@@ -640,8 +651,8 @@ fn cmd_check_bridge(hy: &hytale_unpack::bridge::Hytale, scenes: Option<f64>) -> 
     let mut fails: Vec<String> = Vec::new();
     let mut clips = 0usize;
     let mut instances = 0u64;
-    let (mut with_attachments, mut worn, mut pieces, mut unmatched, mut with_left_out) =
-        (0u64, 0u64, 0u64, 0u64, 0u64);
+    let (mut with_attachments, mut worn, mut pieces, mut unmatched, mut with_left_out, mut bare) =
+        (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
     let mut left_out = std::collections::BTreeMap::<&str, u64>::new();
     let mut unresolved = std::collections::BTreeMap::<String, u64>::new();
     let names: Vec<String> = hy.assets().names().map(String::from).collect();
@@ -702,6 +713,11 @@ fn cmd_check_bridge(hy: &hytale_unpack::bridge::Hytale, scenes: Option<f64>) -> 
                         .iter()
                         .map(|a| a.unmatched_pieces.len() as u64)
                         .sum::<u64>();
+                    bare += r
+                        .attachments
+                        .iter()
+                        .map(|a| a.bare_offset_pieces.len() as u64)
+                        .sum::<u64>();
                 }
                 if !r.attachments_left_out.is_empty() {
                     with_left_out += 1;
@@ -712,7 +728,7 @@ fn cmd_check_bridge(hy: &hytale_unpack::bridge::Hytale, scenes: Option<f64>) -> 
                     } else if why.contains("Weight") {
                         "weighted entry"
                     } else if why.starts_with("adds nothing") {
-                        "pieces with no node to attach to"
+                        "entries that add nothing"
                     } else {
                         "other"
                     };
@@ -744,7 +760,7 @@ fn cmd_check_bridge(hy: &hytale_unpack::bridge::Hytale, scenes: Option<f64>) -> 
     }
     println!("{clips} clips built, {instances} scene instances");
     println!(
-        "attachments: {with_attachments} models wear {worn} ({pieces} pieces merged, {unmatched} pieces with no node of that name); {with_left_out} models have entries left out: {left_out:?}"
+        "attachments: {with_attachments} models wear {worn} ({pieces} pieces merged, {unmatched} pieces with no node of that name and {bare} on bare pivots with an offset, in the attachments that are worn); {with_left_out} models have entries left out: {left_out:?}"
     );
     if !unresolved.is_empty() {
         let total: u64 = unresolved.values().sum();

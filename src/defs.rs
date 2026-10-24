@@ -41,6 +41,8 @@
 //! `GradientSet` and `GradientId` name a tint: `Cosmetics/CharacterCreator/GradientSets.json`
 //! lists every set with its gradients, each a path to a 256 x 16 PNG ([`GradientSets`]). The
 //! textures that go with a gradient are greyscale in the tinted regions; see [`crate::image::tint`].
+//! An entity's own gradient is applied to its texture only where the data pairs them, see
+//! [`ModelDef::gradient_paired`].
 //!
 //! # Items and blocks (`Server/Item/Items/**.json`)
 //!
@@ -240,7 +242,30 @@ impl Defs {
     /// An entity model definition (`Server/Models/**.json`) with its parents merged in.
     pub fn model_def(&self, assets: &Assets, path: &str) -> Result<ModelDef> {
         let v = self.resolve(assets, Family::Models, path, 0)?;
-        Ok(ModelDef::from_json(&v))
+        let mut def = ModelDef::from_json(&v);
+        // which file of the Parent chain supplies each of the three keys
+        let mut cur = path.to_string();
+        for _ in 0..32 {
+            let own: Value = assets.read_json(&cur)?;
+            for (key, slot) in [
+                ("Texture", &mut def.texture_from),
+                ("GradientSet", &mut def.gradient_from),
+                ("GradientId", &mut def.gradient_id_from),
+            ] {
+                if slot.is_none() && own.get(key).is_some() {
+                    *slot = Some(cur.clone());
+                }
+            }
+            match own
+                .get("Parent")
+                .and_then(Value::as_str)
+                .and_then(|p| self.models.get(p))
+            {
+                Some(next) => cur = next.clone(),
+                None => break,
+            }
+        }
+        Ok(def)
     }
 
     /// An item definition (`Server/Item/Items/**.json`) with its parents merged in.
@@ -364,12 +389,33 @@ pub struct ModelDef {
     pub attachments: Vec<AttachmentDef>,
     /// `RandomAttachmentSets`: set name -> option name -> the model (`None` for `{}`)
     pub random_attachment_sets: BTreeMap<String, BTreeMap<String, Option<AttachmentDef>>>,
-    /// The entity's own `GradientSet` / `GradientId`
+    /// The entity's `GradientSet` / `GradientId` after inheritance
     pub gradient: Option<GradientRef>,
+    /// The definition files (child first) that supply the effective `Texture`, `GradientSet` and
+    /// `GradientId`. Filled by [`Defs::model_def`]; empty for a def read from bare JSON.
+    pub texture_from: Option<String>,
+    pub gradient_from: Option<String>,
+    pub gradient_id_from: Option<String>,
     pub hit_box_height: Option<f32>,
 }
 
 impl ModelDef {
+    /// Whether the data pairs the entity's gradient with its texture: `Texture`, `GradientSet` and
+    /// `GradientId` all come from one definition file. This is how every other record that has a
+    /// gradient is written (a cosmetic's `GreyscaleTexture` and `GradientSet`, an attachment's
+    /// `Texture` and `GradientSet`, side by side in one object); a child that gives its own
+    /// `Texture` and does not restate the gradient breaks the pair.
+    pub fn gradient_paired(&self) -> bool {
+        match (
+            &self.texture_from,
+            &self.gradient_from,
+            &self.gradient_id_from,
+        ) {
+            (Some(t), Some(g), Some(i)) => t == g && g == i,
+            _ => false,
+        }
+    }
+
     pub fn from_json(v: &Value) -> Self {
         let s = |k: &str| v.get(k).and_then(Value::as_str).map(String::from);
         let mut def = ModelDef {
@@ -642,6 +688,21 @@ mod tests {
         assert!(ModelDef::from_json(&merge(&base, &empty))
             .attachments
             .is_empty());
+    }
+
+    #[test]
+    fn a_gradient_is_paired_with_the_texture_only_when_one_file_gives_all_three() {
+        let from = |t: &str, g: &str, i: &str| ModelDef {
+            texture_from: Some(t.into()),
+            gradient_from: Some(g.into()),
+            gradient_id_from: Some(i.into()),
+            ..ModelDef::default()
+        };
+        assert!(from("Player.json", "Player.json", "Player.json").gradient_paired());
+        // a child with its own Texture inherits the gradient: not paired
+        assert!(!from("Trork.json", "Player.json", "Player.json").gradient_paired());
+        assert!(!from("Player.json", "Player.json", "Other.json").gradient_paired());
+        assert!(!ModelDef::default().gradient_paired());
     }
 
     #[test]

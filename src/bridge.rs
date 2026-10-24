@@ -28,8 +28,10 @@
 //! model's name, else `Texture.png`, else a PNG in `<name>_Textures/`. Where a definition lists
 //! several textures (random variants), the first is used.
 //!
-//! An entity definition's `GradientSet` / `GradientId` tints that texture ([`crate::image::tint`]);
-//! the report says which gradient was used.
+//! An entity definition's `GradientSet` / `GradientId` tints its texture ([`crate::image::tint`])
+//! only where the data pairs the two: both come from one definition file
+//! ([`crate::defs::ModelDef::gradient_paired`]). The report says which gradient was used, or which
+//! one was not and why.
 //!
 //! # Attachments
 //!
@@ -83,12 +85,6 @@ use crate::rig::{build_clip, build_rig, qmul, qnorm, to_image, Rig};
 /// placed furniture, pitch and roll could not be.
 pub const ROTATION_SIGNS: [f32; 3] = [1.0, 1.0, 1.0];
 
-/// An entity's own `GradientSet` tints its texture only when at least this share of the texels is
-/// grey. This is a rule of this crate, not of the game's data: the 137 models that inherit the
-/// player's gradient with a colour texture have 0.5 % grey texels at most, the 8 player-based ones
-/// with a greyscale texture 93 %.
-pub const GREYSCALE_SHARE: f32 = 0.5;
-
 pub struct Hytale {
     assets: Assets,
     defs: Defs,
@@ -114,9 +110,11 @@ pub struct SceneReport {
 #[derive(Clone, Debug, Default)]
 pub struct LoadReport {
     pub texture: Option<String>,
-    /// The gradient (`Set/Id`) the entity's own texture was tinted with, if its definition names
-    /// one that exists
+    /// The gradient (`Set/Id`) the entity's own texture was tinted with
     pub tint: Option<String>,
+    /// A gradient the definition has (`Set/Id`) that was not applied to its texture because the
+    /// data does not pair the two (they come from different definition files), with the files
+    pub tint_not_applied: Option<String>,
     pub clips: usize,
     pub dropped_visible_keys: usize,
     pub dropped_uv_keys: usize,
@@ -146,6 +144,9 @@ pub struct AttachmentNote {
     pub meshes_added: usize,
     /// `isPiece` nodes that found no node of that name and were left out with what hangs below
     pub unmatched_pieces: Vec<String>,
+    /// `isPiece` nodes whose body node is a bare pivot with a shape offset, left out with what
+    /// hangs below them (see [`crate::rig::AttachReport::bare_offset`])
+    pub bare_offset_pieces: Vec<String>,
 }
 
 fn kind_of_model(path: &str) -> AssetKind {
@@ -387,13 +388,8 @@ impl Hytale {
             Some(p) => Some(self.texture(p)?),
             None => None,
         };
-        // An entity's own gradient is often inherited (every `Parent: Player` has the skin gradient)
-        // by a model whose texture is painted in colour, with a few grey texels for outlines: only
-        // a texture that is mostly grey is a greyscale texture to tint.
         let new = match (&tex, gradient) {
-            (Some(t), Some(g)) if t.grey_share() >= GREYSCALE_SHARE => {
-                self.tinted_texture(t.clone(), g).ok().map(|t2| (g, t2))
-            }
+            (Some(t), Some(g)) => self.tinted_texture(t.clone(), g).ok().map(|t2| (g, t2)),
             _ => None,
         };
         if let Some((g, t2)) = new {
@@ -434,13 +430,22 @@ impl Hytale {
                     .ok_or_else(|| anyhow!("{id}: no Model"))?,
             );
             let tex = def.texture.as_deref().map(Assets::common);
-            let (mut rig, tex_path) = self.rig_for(
-                &model_path,
-                tex.as_deref(),
-                1.0,
-                def.gradient.as_ref(),
-                &mut report.tint,
-            )?;
+            let gradient = if def.gradient_paired() {
+                def.gradient.as_ref()
+            } else {
+                if let Some(g) = &def.gradient {
+                    report.tint_not_applied = Some(format!(
+                        "{}/{}: GradientSet from {}, Texture from {}",
+                        g.set,
+                        g.id,
+                        def.gradient_from.as_deref().unwrap_or("?"),
+                        def.texture_from.as_deref().unwrap_or("?")
+                    ));
+                }
+                None
+            };
+            let (mut rig, tex_path) =
+                self.rig_for(&model_path, tex.as_deref(), 1.0, gradient, &mut report.tint)?;
             report.texture = tex_path;
             if attachments {
                 self.compose_attachments(&mut rig, &def, &mut report);
@@ -492,13 +497,23 @@ impl Hytale {
             match self.wear(rig, a) {
                 Ok(note) if note.nodes_added == 0 => {
                     // every piece found no node to hang from, so nothing was added
-                    let why = if note.unmatched_pieces.is_empty() {
+                    let mut why = Vec::new();
+                    if !note.unmatched_pieces.is_empty() {
+                        why.push(format!(
+                            "no node named {}",
+                            note.unmatched_pieces.join(" or ")
+                        ));
+                    }
+                    if !note.bare_offset_pieces.is_empty() {
+                        why.push(format!(
+                            "{} sit on bare pivots with a shape offset",
+                            note.bare_offset_pieces.join(" and ")
+                        ));
+                    }
+                    let why = if why.is_empty() {
                         "adds nothing: its pieces have no children".to_string()
                     } else {
-                        format!(
-                            "adds nothing: no node named {}",
-                            note.unmatched_pieces.join(" or ")
-                        )
+                        format!("adds nothing: {}", why.join("; "))
                     };
                     report.attachments_left_out.push((a.model.clone(), why));
                 }
@@ -577,6 +592,7 @@ impl Hytale {
             nodes_added: rep.nodes_added,
             meshes_added: rep.meshes_added,
             unmatched_pieces: rep.unmatched,
+            bare_offset_pieces: rep.bare_offset,
         })
     }
 

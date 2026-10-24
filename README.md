@@ -263,52 +263,86 @@ let house = hy.load_scene("Server/Prefabs/Npc/Kweebec/Autumn/Houses_Small/Kweebe
 
 ## Attachments
 
-What the game's data says, and what this crate does with it (a model such as the player's face, an armour or the
-tusks of a Trork are separate `.blockymodel` files):
+What the game's data says, what this crate does with it, and where each rule comes from (a model such as the
+player's face, an armour or the tusks of a Trork are separate `.blockymodel` files).
+
+**The reference tool.** Where the data is silent, the rules below follow the Blockbench plugin's source
+([JannisX11/hytale-blockbench-plugin](https://github.com/JannisX11/hytale-blockbench-plugin), version 0.11.0, commit
+`485397c`, 2026-10-09: `src/blockymodel.ts`, `src/attachments.ts`). Its repository is a personal one of the author of
+Blockbench (the package lists "JannisX11, Kanno"), its files carry "Copyright (C) 2025 Hypixel Studios Canada inc." under the GPL-3.0, and its README calls
+some features ones "that the Hytale team uses". The studio's [modding post](https://hytale.com/news/2025/11/hytale-modding-strategy-and-status)
+says a Blockbench plugin exists and links no address. So it is **third-party hosted, with the studio's copyright
+notice, and not confirmed as the studio's own release by any official page**; this crate treats it as a reference to
+check, not as the data. Each rule is marked below as confirmed by the game's own icons or not.
+
+**The icons.** `Common/Icons/ModelsGenerated/*.png` are 128 px renders the game made of 255 entity models. Their
+camera and pose are not known, and some creatures are seen from the side. The comparison used the 99 entity models
+that have an icon and list at least one attachment: icon and render are both reduced to a silhouette (the icon's
+alpha; the render on a keyed background), cropped to its bounding box, padded to a square and scaled to 64 x 64; the
+score is the intersection over union (IoU) of the silhouettes and the mean difference of the colours, each image
+divided by its own mean colour, inside the intersection. Renders are the first frame of `Idle`, seen from the front
+and slightly above; where a rule could depend on the camera, the best of five (from -90 to 90 degrees) was taken, the
+same for both variants. This is a coarse measure and was looked at by eye as well; the renders and contact sheets
+are game content and are not in this repository.
+
+| rule | from | the icons |
+|---|---|---|
+| A piece (`isPiece: true`) goes onto the first node of the same name, at any depth of the attachment's tree, among the nodes that exist before it (the body, then earlier attachments) | plugin (`existing_groups.find`, the tooltip "attached to a node of the same name") | **confirmed**: worn vs bare body, IoU better in 89 of 99 models and worse in 8, mean 0.577 to 0.658, colour error lower in 69 and higher in 30 |
+| The piece's children hang from that node, at their own position plus that node's shape offset (the rule for any parent) | plugin, and the crate's general hierarchy rule | **confirmed together with the rule above**: the alternative that keeps the pieces as ordinary nodes at their own place scores worse (mean IoU 0.602; better in 77 models, worse in 20, colour error 87 to 12) |
+| The piece's own position is not used | the data: the face quad of `Player_Face_Detached` is authored 20 px below a `Head` piece at y 79, the body's head pivot is at 87, and it lands on the head box's front only on the body's node | **confirmed** by the same comparison |
+| The piece's own orientation and shape offset are not used | plugin only (its code zeroes the rotation of a piece and the offset of its children, and a comment there saying the rotation matters for the model on its own but not once attached). 439 of the 2,060 worn pieces are rotated, 577 have an offset | **not confirmed**: on the 56 models with rotated pieces that have children, the best of five cameras gives mean IoU 0.758 ignoring the rotation and 0.761 applying it (better in 19, worse in 28; colour error lower in 34, higher in 16): the icons cannot tell the two apart. Kept because the plugin says so; this is the one rule resting on the plugin alone |
+| A non-piece node is added as it is; a root keeps its own position and orientation | plugin | not tested (12 such roots in the data) |
+| A piece with no node of that name, and what hangs below it, is left out | the data says no more; the plugin shows a loose group | not applicable |
+| A piece whose node is a bare pivot (shape type `none`) with a non-zero shape offset, and what hangs below it, is **left out** | the plugin takes the body's shape offset only when the node has a box or quad, this crate's general rule takes it always, and nothing decides: 18 pieces (the ear anchors of `Zombie`, `Zombie_Aberrant`, `Zombie_Aberrant_Small`, `Zombie_Burnt`, `Zombie_Frost` and `Zombie_Sand`; the eyebrow anchors of `Feran` and `Feran_Civilian`; `R-Thigh` of `Zombie_Aberrant_Small`'s `Shorty_Slim` and `Bone`) | the icon of the Zombie did not settle it |
 
 - **Which models.** An entity definition (`Server/Models/**.json`, with `Parent` inheritance: a child's list replaces
   its parent's) has `DefaultAttachments`, a list of `{Model, Texture, GradientSet?, GradientId?, Weight?}`. 226 of the
   436 entity models list 778 entries: eyes, hair, armour, hats, weapons, back items. The player has five (face, ears,
   mouth, eyes, eyebrows).
-- **Which node.** Inside an attachment model, a node with `isPiece: true` names the node of the body it goes on, by
-  name (the official plugin's tooltip: "attached to a node of the same name"), at any depth of the attachment's
-  tree. The plugin's import (`src/blockymodel.ts`, which this crate follows) puts the piece's group at the body
-  node's pivot plus its shape offset, ignores the piece's own position and orientation, and hangs the piece's
-  children from it. In bridge terms: **the children of a piece become children of the body's node, at their own
-  position plus that node's shape offset**, which is the rule for any parent. Check against the data: the face
-  quad of `Player_Face_Detached` is authored below its `Head` piece and lands on the front of the head box. A node
-  that is not a piece (a root, say) is added as it is. Every node is then reachable by name for the clips, so the
-  eyes blink and the hair sways with the clips that name them, and `Head` carries everything on the head.
-  Uncertain: the plugin takes the body node's shape offset only if the node has a box or quad; this crate takes it
-  whenever the node has one, as it does for every child (the `none`-shaped ear anchors of the Zombie are offset 15 px
-  sideways, which only makes sense if the offset counts). 18 of the 1,909 merges are on such a node.
 - **Which texture.** Each entry names its own texture. An entry with `GradientSet` / `GradientId` is tinted: the set
-  and id are looked up in `Cosmetics/CharacterCreator/GradientSets.json`, which gives a gradient PNG, and every grey
-  texel of the texture takes the colour of the gradient at its brightness (column 0 to 255). Texels that are not
-  grey are painted colours and stay. The entity's own `GradientSet` (the player's `Skin` / `02`, inherited by every
-  `Parent: Player` model) tints the body's texture in the same way, but only when most of its texels are grey: the
-  player-based models' textures are 93 % grey, the 137 other models that inherit the gradient have at most 0.5 %.
-- **How many.** 179 of the 436 entity models wear at least one attachment (719 attachments, 1,906 `isPiece` nodes
+  and id are looked up in `Cosmetics/CharacterCreator/GradientSets.json`, which gives a gradient PNG (a 256 x 16 ramp
+  from dark to light). **The mapping from texture to ramp is inferred, not stated by the data or the plugin** (the
+  plugin's source says nothing about gradients): every grey texel (red = green = blue) takes the colour of the ramp at
+  its brightness, column 0 to 255, and texels that are not grey are painted colours and stay. It was inferred from the
+  files (a brightness ramp and a texture that is grey where it is meant to be coloured by the set) and checked by eye
+  against the game's icons: only 4 of the 99 icon models have a tinted attachment (`Skeleton_Pirate_Captain`,
+  `_Gunner`, `_Striker` and `Zombie_Aberrant`); in the three skeletons the black hat and the red bandanas of the icons
+  match the tinted render and not the grey one, and in `Zombie_Aberrant` the tinted piece is not visible. So 3
+  icons confirm it; the whole-image colour score cannot see it (mean 0.352 tinted, 0.367 not).
+- **The entity's own gradient** (`GradientSet` / `GradientId` next to `Texture` in the definition) tints the entity's
+  texture **only where the data pairs the two**, which is how every other record with a gradient is written (a
+  cosmetic's `GreyscaleTexture` and `GradientSet`, an attachment's `Texture` and `GradientSet`, in one object): when
+  `Texture`, `GradientSet` and `GradientId` all come from the same definition file. `Player.json` gives all three. The
+  gradient is also in 145 entity models, almost all by inheriting it from the player, and nothing in the data, the
+  plugin or the cosmetics files says which texture an inherited gradient tints: a child that gives its own `Texture`
+  and does not restate the gradient breaks the pair. Result: 7 models are tinted (`Player`, `PlayerTestModel_G`,
+  `PlayerTestModel_V`, `Temple_Mithril_Guard`, `NPC_Santa`, `Boy_Trail`, `Warrior_Quest`) and 138 are not, with the
+  gradient reported in `LoadReport::tint_not_applied` and printed by `model`. Of those 138, 137 have a texture painted
+  in colour (the Trork, the skeletons, the Kweebecs...) and nothing to lose; **`NPC_Elf` is the one with a greyscale
+  texture** (the player's, restated) and no restated gradient, so it stays grey. None of the 7 has an icon, so this
+  rule is supported by the data's pairing only, not by the icons.
+- **How many.** 179 of the 436 entity models wear at least one attachment (710 attachments, 1,888 `isPiece` nodes
   merged into body nodes). Each attachment brings its own material and image.
 - **Left out, and why** (all listed in `LoadReport::attachments_left_out`, which `model` prints):
   - `RandomAttachmentSets`: 117 sets on 44 models ("one of Adult_Blue, Adult_Green, ... per instance", a weight
     on most options, `{}` for none). The data does not pick one, so none is worn.
   - the one `DefaultAttachments` entry with a `Weight` (`NPC_Santa`'s curly hair, 0.9): the data does not say what
     the weight means for a default.
-  - 58 entries (weapons held by projectile stand-ins and showcase mannequins) whose only pieces are `R-Attachment` (46),
-    `Origin_Projectile` (11) or `L-Attachment` (1) with no node of that name in the body: nothing to attach to. The plugin shows such a
-    piece as a loose group; the data says no more, so they add nothing.
-  - 37 more unmatched pieces inside worn attachments, mostly the two anchors of the optional ear accessories
+  - 67 entries that add nothing: 58 (weapons held by projectile stand-ins and showcase mannequins) whose only pieces
+    are `R-Attachment` (46), `Origin_Projectile` (11) or `L-Attachment` (1) with no node of that name in the body,
+    and 9 whose pieces sit on bare pivots with an offset (above). The plugin shows an unmatched piece as a loose
+    group; the data says no more.
+  - 24 more unmatched pieces inside worn attachments, mostly the two anchors of the optional ear accessories
     (`R-Ear-EarAccessory`, `L-Ear-EarAccessory`) in `Ears1`; they and what hangs below them are not added.
   - The player's *chosen* hair, clothes, armour and capes (`Cosmetics/CharacterCreator/*.json`, 590 parts
     for the player to pick from) and equipped armour items: no data says who wears what, so nothing is composed.
     The parts load as bare models as before. The same goes for items held in a hand (`R-Attachment`), which have
     no definition that names a wearer.
-  - Piece orientation and offset are not used (see above); a piece's own shape is not drawn (none in the data has one).
+  - A piece's own shape is not drawn (none in the data has one).
 
 `hytale-unpack model <entity> --no-attachments` writes the bare body; `Hytale::load_animated_with(id, false)` does the
-same from code. Eight NPCs were compared with the game's own generated icons (`Common/Icons/ModelsGenerated/*.png`, 128 px
-renders of 255 entity models; the player has none); see [Rendering checks](#rendering-checks).
+same from code. Eight NPCs were also put next to their icons by eye, and the player (which has none) was checked
+against the data (the face quad on the head box); see [Rendering checks](#rendering-checks).
 
 ## Checking the provider
 
@@ -390,8 +424,8 @@ a keyframe past their `duration` (noted, not an error). **Peak RSS 79 MB, about 
 `check-bridge --scenes 30` loads all 436 entity models with a model (69,321 clips built), all 2,830 bare models,
 all 2,956 block items and all 7,828 prefabs as scenes (14.75 million instances), validating each: 0 failures,
 no unresolved block names. Peak RSS 300 to 390 MB (the 23 MB prefab dominates), about 25 s. It also prints the
-attachment tally: 179 models wear 719 attachments (1,906 pieces merged); 103 models have entries left out (117
-random sets, 1 weighted entry, 58 entries with no node to attach to). Two clips fewer than before
+attachment tally: 179 models wear 710 attachments (1,888 pieces merged); 106 models have entries left out (117
+random sets, 1 weighted entry, 67 entries that add nothing). Two clips fewer than before
 attachments (`RestUp` of `Kweebec_Sapling_HardHat` and `_Razorleaf`): their `Hair-B2` keyframe at a negative time
 now finds its node (the hair attachment) and the bridge rejects the clip, which is left out and named in
 `LoadReport::skipped_clips` as before.
@@ -399,8 +433,9 @@ now finds its node (the hair attachment) and the bridge rejects the clip, which 
 ## What is left out
 
 - **Some attachments** (the rest is composed, see [Attachments](#attachments)): `RandomAttachmentSets` (117 sets on 44
-  models) and the one weighted default entry, because the data gives no pick; entries whose pieces find no node to
-  attach to (58, mostly held weapons); the cosmetics a player chooses and equipped armour, because no data says who
+  models) and the one weighted default entry, because the data gives no pick; entries that add nothing (67: held
+  weapons with no node to attach to, and pieces on bare pivots with a shape offset); the entity gradient of the 138
+  models whose texture the data does not pair with it; the cosmetics a player chooses and equipped armour, because no data says who
   wears what. Clips that animate the nodes of attachments that are not worn (`Hair-B`, `Cape1`, ...) are still
   reported as missing nodes.
 - `shapeVisible` and `shapeUvOffset` keyframes (the bridge has no visibility or UV targets), `holdLastKeyframe`

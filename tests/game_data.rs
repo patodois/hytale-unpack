@@ -590,20 +590,65 @@ fn an_attached_model_is_drawn_with_its_own_texture() {
 }
 
 #[test]
-fn only_greyscale_textures_take_the_entitys_gradient() {
+fn the_entity_gradient_applies_only_where_the_data_pairs_it_with_the_texture() {
     let hy = need!();
-    let tint = |id: &str| hy.load_animated_report(id).unwrap().1.tint;
-    // the player's skin gradient is inherited by the Trork, whose texture is painted in colour
+    let load = |id: &str| hy.load_animated_report(id).unwrap().1;
+    // Player.json gives Texture, GradientSet and GradientId in one file
     assert_eq!(
-        tint("Server/Models/Human/Player.json").as_deref(),
+        load("Server/Models/Human/Player.json").tint.as_deref(),
         Some("Skin/02")
     );
     assert_eq!(
-        tint("Server/Models/Instances/Forgotten_Temple/Temple_Mithril_Guard.json").as_deref(),
+        load("Server/Models/Instances/Forgotten_Temple/Temple_Mithril_Guard.json")
+            .tint
+            .as_deref(),
         Some("Skin/02")
     );
-    assert_eq!(tint("Server/Models/Intelligent/Trork/Trork.json"), None);
-    assert_eq!(tint("Server/Models/Undead/Skeleton.json"), None);
+    // the Trork has its own Texture and inherits the gradient from the player: not paired
+    let trork = load("Server/Models/Intelligent/Trork/Trork.json");
+    assert_eq!(trork.tint, None);
+    assert!(trork.tint_not_applied.unwrap().starts_with("Skin/02"));
+    // NPC_Elf restates the player's greyscale texture without restating the gradient
+    let elf = load("Server/Models/NPC_Elf.json");
+    assert_eq!(elf.tint, None);
+    assert!(elf.tint_not_applied.is_some());
+    // 7 of the 145 definitions with a gradient pair it with their texture
+    let (mut paired, mut with_gradient) = (0, 0);
+    for id in hy.defs().model_paths() {
+        let def = hy.defs().model_def(hy.assets(), id).unwrap();
+        if def.model.is_none() || def.gradient.is_none() {
+            continue;
+        }
+        with_gradient += 1;
+        paired += def.gradient_paired() as usize;
+    }
+    assert_eq!((paired, with_gradient), (7, 145));
+}
+
+#[test]
+fn a_piece_on_a_bare_pivot_with_a_shape_offset_is_left_out() {
+    let hy = need!();
+    // the Zombie's ear anchors are bare pivots 15 px to each side: the plugin and the crate's
+    // general rule disagree about them and nothing decides, so the ears are not worn
+    let (_, report) = hy
+        .load_animated_report("Server/Models/Undead/Zombie.json")
+        .unwrap();
+    assert!(report
+        .attachments_left_out
+        .iter()
+        .any(|(what, why)| what.ends_with("Ears1.blockymodel") && why.contains("bare pivots")));
+    assert!(!report
+        .attachments
+        .iter()
+        .any(|a| a.model.ends_with("Ears1.blockymodel")));
+    // the player's ear anchors are bare pivots without an offset: worn
+    let (_, report) = hy
+        .load_animated_report("Server/Models/Human/Player.json")
+        .unwrap();
+    assert!(report
+        .attachments
+        .iter()
+        .any(|a| a.model.ends_with("Ears1.blockymodel") && a.pieces == 2));
 }
 
 #[test]
@@ -666,6 +711,6 @@ fn every_entity_with_attachments_loads_and_validates() {
     }
     // counts of the install this was written against (README); a newer game may add more
     assert!(wearing >= 179, "{wearing}");
-    assert!(worn >= 719, "{worn}");
+    assert!(worn >= 710, "{worn}");
     assert!(random >= 44, "{random}");
 }
