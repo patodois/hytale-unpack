@@ -9,7 +9,8 @@ A small Rust reader for the game data of Hytale, read from your own install:
 - `.blockymodel` (2,830 models: node trees of boxes and quads with texture layouts);
 - `.blockyanim` (6,736 clips);
 - prefabs (`Server/Prefabs/**.prefab.json`, 7,828 buildings, 20.6 million block cells);
-- the JSON definitions that link them: entity models (`Server/Models`), items and blocks (`Server/Item/Items`);
+- the JSON definitions that link them: entity models (`Server/Models`), items and blocks (`Server/Item/Items`),
+  the attachments an entity wears and the tint gradients of its textures;
 - a [rewrite-bridge](https://github.com/patodois/rewrite-bridge) `Provider` for all of it, so other game
   rewrites can load Hytale models, animations and buildings; and a glTF 2.0 exporter.
 
@@ -76,7 +77,10 @@ To build it yourself instead, see [Build and use](#build-and-use).
   node) files. A *clip* is one animation. A *prefab* is a stored building: a list of block cells.
 - **Entity model, block item**: JSON definitions that link a model to its texture and clips (`Server/Models`), or a
   model to a block (`Server/Item/Items`).
-- **Attachment**: a separate model worn by another one (eyes, hair, hats). See [What is left out](#what-is-left-out).
+- **Attachment**: a separate model worn by another one (eyes, hair, armour, hats), listed in an entity's
+  `DefaultAttachments`. Its `isPiece` nodes merge into the same-named nodes of the body. See [Attachments](#attachments).
+- **Gradient**: a 256 x 16 PNG ramp from dark to light that tints a greyscale texture (`GradientSet` and `GradientId`
+  in the definitions).
 - **glTF**: the open 3D file format the exporter writes; any viewer or Blender opens it.
 - **[rewrite-bridge](https://github.com/patodois/rewrite-bridge)**: a small library with common model types, so
   rewrites of different games can load each other's assets into one scene. A **`Provider`** is a game's reader
@@ -217,7 +221,7 @@ let house = hy.load_scene("Server/Prefabs/Npc/Kweebec/Autumn/Houses_Small/Kweebe
 
 | id | kind | `load` / `load_animated` / `load_scene` |
 |----|------|-----------------------------------------|
-| `Server/Models/**.json` with a `Model` | Character | model + texture; clips from `AnimationSets` |
+| `Server/Models/**.json` with a `Model` | Character | model + texture + default attachments; clips from `AnimationSets` |
 | `Common/**.blockymodel` | Character, Weapon, Prop, Other by folder | model + the texture found next to it; clips by folder rule |
 | `Server/Item/Items/**.json` with a drawable `BlockType` | Prop | the block: textured cube or custom model, origin at the bottom centre of its cell |
 | `Server/Prefabs/**.prefab.json` | Level | `load_scene` only: one instance per block cell |
@@ -250,11 +254,61 @@ let house = hy.load_scene("Server/Prefabs/Npc/Kweebec/Autumn/Houses_Small/Kweebe
   at x = 2.85 stands on cell 2, which a cell centred on its coordinate would make cell 3). `rotation` is `yaw + 4 * pitch (+ 16 * roll)` in quarter turns, applied about the cell centre
   as `Ry(yaw) * Rx(pitch) * Rz(roll)`. Cells with a `filler` (parts of bigger blocks) and `Empty` cells are not drawn.
   `load_scene_report` also returns what was skipped.
+- **Attachments** are composed for entity models; see [Attachments](#attachments).
 - **What is listed.** Only what draws something. Definitions in `Server/Models` without a `Model` (the showcase
   mannequins that are only particles) and items whose `BlockType` draws nothing are not listed: `DrawType: Empty`
   (`Barrier`), and the editor's brush filters and prefab placers (`Filter_TreeWoodAndLeaves`, `Filter_Rock`,
   `ExamplePrefabPlacementBlock_Tree`), whose `BlockType` only names a block list or a prefab list
   (`BlockListAssetId`, `PrefabListAssetId`) for the tool to use. Prefab cells can still name any block.
+
+## Attachments
+
+What the game's data says, and what this crate does with it (a model such as the player's face, an armour or the
+tusks of a Trork are separate `.blockymodel` files):
+
+- **Which models.** An entity definition (`Server/Models/**.json`, with `Parent` inheritance: a child's list replaces
+  its parent's) has `DefaultAttachments`, a list of `{Model, Texture, GradientSet?, GradientId?, Weight?}`. 226 of the
+  436 entity models list 778 entries: eyes, hair, armour, hats, weapons, back items. The player has five (face, ears,
+  mouth, eyes, eyebrows).
+- **Which node.** Inside an attachment model, a node with `isPiece: true` names the node of the body it goes on, by
+  name (the official plugin's tooltip: "attached to a node of the same name"), at any depth of the attachment's
+  tree. The plugin's import (`src/blockymodel.ts`, which this crate follows) puts the piece's group at the body
+  node's pivot plus its shape offset, ignores the piece's own position and orientation, and hangs the piece's
+  children from it. In bridge terms: **the children of a piece become children of the body's node, at their own
+  position plus that node's shape offset**, which is the rule for any parent. Check against the data: the face
+  quad of `Player_Face_Detached` is authored below its `Head` piece and lands on the front of the head box. A node
+  that is not a piece (a root, say) is added as it is. Every node is then reachable by name for the clips, so the
+  eyes blink and the hair sways with the clips that name them, and `Head` carries everything on the head.
+  Uncertain: the plugin takes the body node's shape offset only if the node has a box or quad; this crate takes it
+  whenever the node has one, as it does for every child (the `none`-shaped ear anchors of the Zombie are offset 15 px
+  sideways, which only makes sense if the offset counts). 18 of the 1,909 merges are on such a node.
+- **Which texture.** Each entry names its own texture. An entry with `GradientSet` / `GradientId` is tinted: the set
+  and id are looked up in `Cosmetics/CharacterCreator/GradientSets.json`, which gives a gradient PNG, and every grey
+  texel of the texture takes the colour of the gradient at its brightness (column 0 to 255). Texels that are not
+  grey are painted colours and stay. The entity's own `GradientSet` (the player's `Skin` / `02`, inherited by every
+  `Parent: Player` model) tints the body's texture in the same way, but only when most of its texels are grey: the
+  player-based models' textures are 93 % grey, the 137 other models that inherit the gradient have at most 0.5 %.
+- **How many.** 179 of the 436 entity models wear at least one attachment (719 attachments, 1,906 `isPiece` nodes
+  merged into body nodes). Each attachment brings its own material and image.
+- **Left out, and why** (all listed in `LoadReport::attachments_left_out`, which `model` prints):
+  - `RandomAttachmentSets`: 117 sets on 44 models ("one of Adult_Blue, Adult_Green, ... per instance", a weight
+    on most options, `{}` for none). The data does not pick one, so none is worn.
+  - the one `DefaultAttachments` entry with a `Weight` (`NPC_Santa`'s curly hair, 0.9): the data does not say what
+    the weight means for a default.
+  - 58 entries (weapons held by projectile stand-ins and showcase mannequins) whose only pieces are `R-Attachment` (46),
+    `Origin_Projectile` (11) or `L-Attachment` (1) with no node of that name in the body: nothing to attach to. The plugin shows such a
+    piece as a loose group; the data says no more, so they add nothing.
+  - 37 more unmatched pieces inside worn attachments, mostly the two anchors of the optional ear accessories
+    (`R-Ear-EarAccessory`, `L-Ear-EarAccessory`) in `Ears1`; they and what hangs below them are not added.
+  - The player's *chosen* hair, clothes, armour and capes (`Cosmetics/CharacterCreator/*.json`, 590 parts
+    for the player to pick from) and equipped armour items: no data says who wears what, so nothing is composed.
+    The parts load as bare models as before. The same goes for items held in a hand (`R-Attachment`), which have
+    no definition that names a wearer.
+  - Piece orientation and offset are not used (see above); a piece's own shape is not drawn (none in the data has one).
+
+`hytale-unpack model <entity> --no-attachments` writes the bare body; `Hytale::load_animated_with(id, false)` does the
+same from code. Eight NPCs were compared with the game's own generated icons (`Common/Icons/ModelsGenerated/*.png`, 128 px
+renders of 255 entity models; the player has none); see [Rendering checks](#rendering-checks).
 
 ## Checking the provider
 
@@ -268,17 +322,18 @@ hytale-unpack check-conformance --filter Server/Models/Beast/ --limit 20   # 20 
 hytale-unpack check-conformance --id Server/Models/Beast/Rat.json -v       # one creature, with the info findings
 ```
 
-(`--kind character` would list the attachment models first: beards, hair and ears, which are bare pieces.)
+(`--kind character` would list the attachment models first: beards, hair and ears, which are bare pieces that
+load as they are, not worn.)
 
 On the install this was written against, every listed model, block and prefab loads, and no clip name repeats:
-0 errors. A full run (`hytale-unpack check-conformance`, 14,037 assets, about 25 s, peak RSS 400 MB) ends with this
+0 errors. A full run (`hytale-unpack check-conformance`, 14,037 assets, about 25 s, peak RSS 370 MB) ends with this
 table of warnings, which come from the game's data or from what is left out, not from the loading:
 
 | warning | count | assets | what it means here |
 |---|---:|---:|---|
-| `animation.zero_scale` | 1,431 | 193 | clips hide a node by scaling it to zero: the blink (`L-Eye`, eyelids) in nearly all of them |
+| `animation.zero_scale` | 1,824 | 243 | clips hide a node by scaling it to zero: the blink (`L-Eye`, eyelids) in nearly all of them |
 | `orientation.feet_off_ground` | 541 | 541 | the lowest point is more than 0.3 m from the ground: attachment pieces modelled at head height (hair, beards, hats, eyes, ears) and a few flying creatures (bat, hawk, raven) |
-| `animation.empty` | 459 | 459 | clips with no channels because they only move nodes the model lacks: eyes and hair (separate attachment models, not composed), or another block's animation such as `Candle_Burn`, which a block model picks up from its folder |
+| `animation.empty` | 409 | 409 | clips with no channels because they only move nodes the model lacks: bare attachment models (eyes, hair) loaded on their own, or another block's animation such as `Candle_Burn`, which a block model picks up from its folder |
 | `geometry.degenerate_triangles` | 129 | 20 | triangles with no area: boxes of zero thickness in hair and costume pieces and a few bones |
 | `scale.height_out_of_range` | 103 | 103 | under 0.2 m high: small pieces (eyebrows, shoes, gloves, a rattle) |
 | `scene.empty` | 50 | 50 | prefabs whose cells are all `Empty` (they carve holes in terrain, e.g. `Klops_Basalt_Cave_001`) |
@@ -308,6 +363,12 @@ node shot.cjs out.png model.gltf "anim=Walk&frac=0.33&fit=1.0&dir=0.6,0.3,1" 800
 Used to check by eye (exported glTF files and renders are game content and are not in this repository):
 
 - character: Trork (`Server/Models/Intelligent/Trork/Trork.json`) and the player;
+- attachments: the player with and without its five attachments; eight NPCs (`Outlander_Hunter`,
+  `Kweebec_Sproutling`, `Trork_Chieftain`, `Skeleton_Archer`, `Feran_Civilian`, `Goblin_Lobber`,
+  `Skeleton_Sand_Ranger`, `Outlander_Priest`) side by side with the game's own icon of each: hair, armour, hats,
+  tusks, eyes and colours agree; and `Trork_Chieftain` and `Outlander_Hunter` mid-walk, where the armour and hair
+  stay on their bones. The icons are a reference by eye only (128 px, their camera is not known), and are game
+  content like the renders;
 - animation: Trork `Walk` and player `Run`, three frames each;
 - block: `Bench_WorkBench`;
 - building: `Encounter_Forest_Townhall_001` (4,092 cells, 43 block names) and a Kweebec tree house.
@@ -326,15 +387,22 @@ Used to check by eye (exported glTF files and renders are game content and are n
 Prefab versions: all `version 8` / `blockIdVersion 11`. Block `rotation` values seen: 1 to 11 only. Two clips have
 a keyframe past their `duration` (noted, not an error). **Peak RSS 79 MB, about 5 s** (`/usr/bin/time -l`: 79 MB).
 
-`check-bridge --scenes 30` loads all 436 entity models with a model (69,323 clips built), all 2,830 bare models,
+`check-bridge --scenes 30` loads all 436 entity models with a model (69,321 clips built), all 2,830 bare models,
 all 2,956 block items and all 7,828 prefabs as scenes (14.75 million instances), validating each: 0 failures,
-no unresolved block names. Peak RSS 300 to 390 MB (the 23 MB prefab dominates), about 25 s.
+no unresolved block names. Peak RSS 300 to 390 MB (the 23 MB prefab dominates), about 25 s. It also prints the
+attachment tally: 179 models wear 719 attachments (1,906 pieces merged); 103 models have entries left out (117
+random sets, 1 weighted entry, 58 entries with no node to attach to). Two clips fewer than before
+attachments (`RestUp` of `Kweebec_Sapling_HardHat` and `_Razorleaf`): their `Hair-B2` keyframe at a negative time
+now finds its node (the hair attachment) and the bridge rejects the clip, which is left out and named in
+`LoadReport::skipped_clips` as before.
 
 ## What is left out
 
-- **Attachments** (`isPiece`, `DefaultAttachments`: eyes, hair, cloth, hats). The player's face and a Kweebec's
-  eyes are separate attachment models; they are reported by `model` and not composed. Clips that animate their
-  nodes (`Hair-B`, `L-Eye`, ...) are reported as missing nodes.
+- **Some attachments** (the rest is composed, see [Attachments](#attachments)): `RandomAttachmentSets` (117 sets on 44
+  models) and the one weighted default entry, because the data gives no pick; entries whose pieces find no node to
+  attach to (58, mostly held weapons); the cosmetics a player chooses and equipped armour, because no data says who
+  wears what. Clips that animate the nodes of attachments that are not worn (`Hair-B`, `Cape1`, ...) are still
+  reported as missing nodes.
 - `shapeVisible` and `shapeUvOffset` keyframes (the bridge has no visibility or UV targets), `holdLastKeyframe`
   and looping, clip `Speed`/`Looping`/blending from the animation sets. Smooth rotations are spherical, not
   smoothed.

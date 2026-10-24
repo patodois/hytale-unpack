@@ -17,13 +17,30 @@
 //!   "Model":   "Characters/Player.blockymodel",              // relative to Common/
 //!   "Texture": "Characters/Player_Textures/Player_Greyscale.png",
 //!   "HitBox": {...}, "EyeHeight": 1.6, "MinScale": 1, "MaxScale": 1, ...,
-//!   "DefaultAttachments": [ { "Model": ..., "Texture": ... } ],
+//!   "DefaultAttachments": [ { "Model": ..., "Texture": ..., "GradientSet"?: "Hair", "GradientId"?: "Brown",
+//!                             "Weight"?: 0.9 } ],
+//!   "RandomAttachmentSets": { "<set>": { "<option>": { "Model": ..., "Texture": ..., "Weight"? } } },
+//!   "GradientSet": "Skin", "GradientId": "02",
 //!   "AnimationSets": { "Idle": { "Animations": [ { "Animation": "Characters/Animations/Default/Idle.blockyanim",
 //!                                                  "Speed": 0.5, "Looping": true, ... } ] }, ... } }
 //! ```
 //!
 //! This is the data link between a model and its clips: the sets name the clips (`Idle`, `Walk`,
 //! `Run`, ...) and give their files.
+//!
+//! # Attachments and gradients
+//!
+//! `DefaultAttachments` lists the models worn by every instance of the entity (eyes, hair, armour,
+//! weapons, hats), each with its own texture. A model's `Parent` chain replaces the whole list, as
+//! it does for any array: 230 of the 436 entity models have a non-empty list after inheritance.
+//! `RandomAttachmentSets` names sets of alternatives (`"Fleece": {"Wool": {...}}`, an option `{}`
+//! meaning none) of which one is picked per instance; the data gives no pick, so they are only
+//! read, never composed. An entry with a `Weight` (a probability or a share) is in the same
+//! position. How the models are glued on is in [`crate::blockymodel`] ("Attachments").
+//!
+//! `GradientSet` and `GradientId` name a tint: `Cosmetics/CharacterCreator/GradientSets.json`
+//! lists every set with its gradients, each a path to a 256 x 16 PNG ([`GradientSets`]). The
+//! textures that go with a gradient are greyscale in the tinted regions; see [`crate::image::tint`].
 //!
 //! # Items and blocks (`Server/Item/Items/**.json`)
 //!
@@ -39,7 +56,7 @@
 //! `Rail` with `BlockType.State.Definitions.Corner_Left` merged over its `BlockType`.
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::{Map, Value};
@@ -70,10 +87,57 @@ enum Family {
     Items,
 }
 
+/// Where the tint gradients are: `Cosmetics/CharacterCreator/GradientSets.json`.
+pub const GRADIENT_SETS_PATH: &str = "Cosmetics/CharacterCreator/GradientSets.json";
+
+/// The gradient sets of the character creator: (set, gradient id) -> the gradient's PNG, as a path
+/// relative to `Common/`. Gradients also carry a `BaseColor`, the swatch colour of the picker,
+/// which is not read.
+#[derive(Clone, Debug, Default)]
+pub struct GradientSets {
+    textures: HashMap<(String, String), String>,
+}
+
+impl GradientSets {
+    pub fn from_json(v: &Value) -> Self {
+        let mut textures = HashMap::new();
+        for set in v.as_array().into_iter().flatten() {
+            let Some(id) = set.get("Id").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(grads) = set.get("Gradients").and_then(Value::as_object) else {
+                continue;
+            };
+            for (gid, g) in grads {
+                if let Some(t) = g.get("Texture").and_then(Value::as_str) {
+                    textures.insert((id.to_string(), gid.clone()), t.to_string());
+                }
+            }
+        }
+        GradientSets { textures }
+    }
+
+    /// The gradient's PNG, relative to `Common/`
+    pub fn texture(&self, g: &GradientRef) -> Option<&str> {
+        self.textures
+            .get(&(g.set.clone(), g.id.clone()))
+            .map(String::as_str)
+    }
+
+    pub fn len(&self) -> usize {
+        self.textures.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.textures.is_empty()
+    }
+}
+
 pub struct Defs {
     models: HashMap<String, String>,
     items: HashMap<String, String>,
     cache: Mutex<HashMap<(Family, String), Arc<Value>>>,
+    gradients: OnceLock<GradientSets>,
 }
 
 fn stem(path: &str) -> &str {
@@ -108,7 +172,18 @@ impl Defs {
             models,
             items,
             cache: Mutex::new(HashMap::new()),
+            gradients: OnceLock::new(),
         }
+    }
+
+    /// The character creator's gradient sets, read on first use (empty when the file is missing).
+    pub fn gradient_sets(&self, assets: &Assets) -> &GradientSets {
+        self.gradients.get_or_init(|| {
+            assets
+                .read_json::<Value>(GRADIENT_SETS_PATH)
+                .map(|v| GradientSets::from_json(&v))
+                .unwrap_or_default()
+        })
     }
 
     pub fn model_paths(&self) -> impl Iterator<Item = &str> {
@@ -236,6 +311,48 @@ pub struct AnimRef {
     pub looping: Option<bool>,
 }
 
+/// A `GradientSet` / `GradientId` pair.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GradientRef {
+    pub set: String,
+    pub id: String,
+}
+
+/// One attached model of an entity definition (`DefaultAttachments`, or an option of
+/// `RandomAttachmentSets`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct AttachmentDef {
+    /// Relative to `Common/`
+    pub model: String,
+    /// Relative to `Common/`
+    pub texture: Option<String>,
+    pub gradient: Option<GradientRef>,
+    /// Present on weighted entries only
+    pub weight: Option<f32>,
+}
+
+impl AttachmentDef {
+    /// `None` for `{}` (the "no attachment" option) and for entries without a model.
+    pub fn from_json(a: &Value) -> Option<Self> {
+        let s = |k: &str| a.get(k).and_then(Value::as_str).map(String::from);
+        Some(AttachmentDef {
+            model: s("Model")?,
+            texture: s("Texture"),
+            gradient: GradientRef::from_json(a),
+            weight: a.get("Weight").and_then(Value::as_f64).map(|x| x as f32),
+        })
+    }
+}
+
+impl GradientRef {
+    pub fn from_json(v: &Value) -> Option<Self> {
+        Some(GradientRef {
+            set: v.get("GradientSet")?.as_str()?.to_string(),
+            id: v.get("GradientId")?.as_str()?.to_string(),
+        })
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct ModelDef {
     /// Relative to `Common/`
@@ -243,7 +360,12 @@ pub struct ModelDef {
     pub texture: Option<String>,
     /// Set name -> clips
     pub animation_sets: BTreeMap<String, Vec<AnimRef>>,
-    pub attachments: Vec<(String, Option<String>)>,
+    /// `DefaultAttachments`, in file order, without the empty `{}` entries
+    pub attachments: Vec<AttachmentDef>,
+    /// `RandomAttachmentSets`: set name -> option name -> the model (`None` for `{}`)
+    pub random_attachment_sets: BTreeMap<String, BTreeMap<String, Option<AttachmentDef>>>,
+    /// The entity's own `GradientSet` / `GradientId`
+    pub gradient: Option<GradientRef>,
     pub hit_box_height: Option<f32>,
 }
 
@@ -278,15 +400,23 @@ impl ModelDef {
             }
         }
         if let Some(att) = v.get("DefaultAttachments").and_then(Value::as_array) {
-            for a in att {
-                if let Some(m) = a.get("Model").and_then(Value::as_str) {
-                    def.attachments.push((
-                        m.to_string(),
-                        a.get("Texture").and_then(Value::as_str).map(String::from),
-                    ));
-                }
+            def.attachments = att.iter().filter_map(AttachmentDef::from_json).collect();
+        }
+        if let Some(sets) = v.get("RandomAttachmentSets").and_then(Value::as_object) {
+            for (set, options) in sets {
+                let Some(options) = options.as_object() else {
+                    continue;
+                };
+                def.random_attachment_sets.insert(
+                    set.clone(),
+                    options
+                        .iter()
+                        .map(|(k, o)| (k.clone(), AttachmentDef::from_json(o)))
+                        .collect(),
+                );
             }
         }
+        def.gradient = GradientRef::from_json(v);
         def.hit_box_height = v
             .pointer("/HitBox/Max/Y")
             .and_then(Value::as_f64)
@@ -469,6 +599,72 @@ mod tests {
                 looping: Some(true)
             }
         );
+    }
+
+    #[test]
+    fn model_defs_read_attachments_random_sets_and_gradients() {
+        let v = json!({"Model": "M.blockymodel", "GradientSet": "Skin", "GradientId": "02",
+            "DefaultAttachments": [
+                {"Model": "A.blockymodel", "Texture": "A.png", "GradientSet": "Hair", "GradientId": "Brown"},
+                {"Model": "B.blockymodel", "Texture": "B.png", "Weight": 0.9},
+                {},
+                {"Model": "C.blockymodel"}],
+            "RandomAttachmentSets": {"Fleece": {"Wool": {"Model": "W.blockymodel", "Texture": "W.png"}, "None": {}}}});
+        let d = ModelDef::from_json(&v);
+        assert_eq!(
+            d.gradient,
+            Some(GradientRef {
+                set: "Skin".into(),
+                id: "02".into()
+            })
+        );
+        // the empty entry is dropped; the others keep file order
+        let models: Vec<_> = d.attachments.iter().map(|a| a.model.as_str()).collect();
+        assert_eq!(models, ["A.blockymodel", "B.blockymodel", "C.blockymodel"]);
+        assert_eq!(d.attachments[0].texture.as_deref(), Some("A.png"));
+        assert_eq!(d.attachments[0].gradient.as_ref().unwrap().id, "Brown");
+        assert_eq!(d.attachments[1].weight, Some(0.9));
+        assert_eq!(d.attachments[2].texture, None);
+        let fleece = &d.random_attachment_sets["Fleece"];
+        assert_eq!(fleece["Wool"].as_ref().unwrap().model, "W.blockymodel");
+        assert!(fleece["None"].is_none());
+    }
+
+    #[test]
+    fn a_child_list_of_attachments_replaces_the_parents() {
+        let base =
+            json!({"DefaultAttachments": [{"Model": "A.blockymodel"}, {"Model": "B.blockymodel"}]});
+        let child = json!({"DefaultAttachments": [{"Model": "C.blockymodel"}]});
+        let d = ModelDef::from_json(&merge(&base, &child));
+        assert_eq!(d.attachments.len(), 1);
+        assert_eq!(d.attachments[0].model, "C.blockymodel");
+        let empty = json!({"DefaultAttachments": []});
+        assert!(ModelDef::from_json(&merge(&base, &empty))
+            .attachments
+            .is_empty());
+    }
+
+    #[test]
+    fn gradient_sets_map_set_and_id_to_a_texture() {
+        let v = json!([
+            {"Id": "Hair", "Gradients": {"Brown": {"BaseColor": ["#5d2014"], "Texture": "TintGradients/Hair/Brown.png"}}},
+            {"Id": "Skin", "Gradients": {"02": {"Texture": "TintGradients/Skin_Tones/02.png"}, "bad": {}}},
+            {"Gradients": {}}]);
+        let g = GradientSets::from_json(&v);
+        assert_eq!(g.len(), 2);
+        let r = |s: &str, i: &str| GradientRef {
+            set: s.into(),
+            id: i.into(),
+        };
+        assert_eq!(
+            g.texture(&r("Hair", "Brown")),
+            Some("TintGradients/Hair/Brown.png")
+        );
+        assert_eq!(
+            g.texture(&r("Skin", "02")).unwrap(),
+            "TintGradients/Skin_Tones/02.png"
+        );
+        assert_eq!(g.texture(&r("Skin", "Brown")), None);
     }
 
     #[test]

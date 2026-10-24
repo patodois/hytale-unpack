@@ -28,6 +28,20 @@
 //! model's name, else `Texture.png`, else a PNG in `<name>_Textures/`. Where a definition lists
 //! several textures (random variants), the first is used.
 //!
+//! An entity definition's `GradientSet` / `GradientId` tints that texture ([`crate::image::tint`]);
+//! the report says which gradient was used.
+//!
+//! # Attachments
+//!
+//! `load_animated` (and so `load`) wears the entity's `DefaultAttachments` on the body: the
+//! attachment's nodes and meshes are added to the model, with its own texture (tinted by its own
+//! `GradientSet` / `GradientId` where it has them), and its `isPiece` nodes merge into the body's
+//! nodes of the same name, so everything follows the body's animation. See
+//! [`crate::blockymodel`] for the rule. [`LoadReport`] lists what was worn and what was left out
+//! with the reason: sets of random alternatives (`RandomAttachmentSets`) and weighted entries,
+//! because the data gives no pick, and attachments whose pieces find no node to attach to.
+//! [`Hytale::load_animated_with`] with `false` gives the bare body.
+//!
 //! # Blocks and prefabs
 //!
 //! A block model's origin is the bottom centre of its cell (the models' x and z span -16..16 px
@@ -60,14 +74,20 @@ use crate::blockyanim::BlockyAnim;
 use crate::blockymodel::{
     shape_faces, BlockyModel, FaceLayout, Settings, Shape, ShapeType, FACE_TRIANGLES, V3,
 };
-use crate::defs::{AnimRef, BlockDesc, Defs, DrawType, ModelDef};
-use crate::image::{decode_png, Rgba};
+use crate::defs::{AnimRef, AttachmentDef, BlockDesc, Defs, DrawType, GradientRef, ModelDef};
+use crate::image::{decode_png, tint, Rgba};
 use crate::prefab::{self, decode_rotation, PrefabBlock, Visit};
 use crate::rig::{build_clip, build_rig, qmul, qnorm, to_image, Rig};
 
 /// Sign applied to quarter turns of yaw, pitch and roll. See the README: yaw was checked against
 /// placed furniture, pitch and roll could not be.
 pub const ROTATION_SIGNS: [f32; 3] = [1.0, 1.0, 1.0];
+
+/// An entity's own `GradientSet` tints its texture only when at least this share of the texels is
+/// grey. This is a rule of this crate, not of the game's data: the 137 models that inherit the
+/// player's gradient with a colour texture have 0.5 % grey texels at most, the 8 player-based ones
+/// with a greyscale texture 93 %.
+pub const GREYSCALE_SHARE: f32 = 0.5;
 
 pub struct Hytale {
     assets: Assets,
@@ -94,15 +114,38 @@ pub struct SceneReport {
 #[derive(Clone, Debug, Default)]
 pub struct LoadReport {
     pub texture: Option<String>,
+    /// The gradient (`Set/Id`) the entity's own texture was tinted with, if its definition names
+    /// one that exists
+    pub tint: Option<String>,
     pub clips: usize,
     pub dropped_visible_keys: usize,
     pub dropped_uv_keys: usize,
     /// Distinct clip node names the model lacks
     pub missing_nodes: Vec<String>,
-    pub attachments_not_composed: Vec<String>,
+    /// The attachments that were composed onto the model, in the order they were worn
+    pub attachments: Vec<AttachmentNote>,
+    /// What an entity definition lists as an attachment and was not composed, as `(what, why)`
+    pub attachments_left_out: Vec<(String, String)>,
     /// Clips that were left out because the bridge would not accept them (a negative key time,
     /// for one), as `(name, why)`. The model itself still loads.
     pub skipped_clips: Vec<(String, String)>,
+}
+
+/// One attachment composed onto an entity model
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AttachmentNote {
+    /// Entry path of the attachment model
+    pub model: String,
+    /// Entry path of its texture
+    pub texture: Option<String>,
+    /// The gradient it was tinted with, as `Set/Id`
+    pub tint: Option<String>,
+    /// `isPiece` nodes merged into nodes of the base model
+    pub pieces: usize,
+    pub nodes_added: usize,
+    pub meshes_added: usize,
+    /// `isPiece` nodes that found no node of that name and were left out with what hangs below
+    pub unmatched_pieces: Vec<String>,
 }
 
 fn kind_of_model(path: &str) -> AssetKind {
@@ -332,16 +375,31 @@ impl Hytale {
         model_zip: &str,
         texture_zip: Option<&str>,
         extra_scale: f32,
+        gradient: Option<&GradientRef>,
+        tinted: &mut Option<String>,
     ) -> Result<(Rig, Option<String>)> {
         let bm = self.blocky(model_zip)?;
         let ppu = bm.pixels_per_unit(model_zip);
         let tex_path = texture_zip
             .map(String::from)
             .or_else(|| self.discover_texture(model_zip));
-        let tex = match &tex_path {
+        let mut tex = match &tex_path {
             Some(p) => Some(self.texture(p)?),
             None => None,
         };
+        // An entity's own gradient is often inherited (every `Parent: Player` has the skin gradient)
+        // by a model whose texture is painted in colour, with a few grey texels for outlines: only
+        // a texture that is mostly grey is a greyscale texture to tint.
+        let new = match (&tex, gradient) {
+            (Some(t), Some(g)) if t.grey_share() >= GREYSCALE_SHARE => {
+                self.tinted_texture(t.clone(), g).ok().map(|t2| (g, t2))
+            }
+            _ => None,
+        };
+        if let Some((g, t2)) = new {
+            *tinted = Some(format!("{}/{}", g.set, g.id));
+            tex = Some(Arc::new(t2));
+        }
         let name = stem(model_zip).to_string();
         let label = tex_path
             .as_deref()
@@ -353,8 +411,20 @@ impl Hytale {
         ))
     }
 
-    /// Loads an entity model definition, a bare model or a block item as an animated model.
+    /// Loads an entity model definition, a bare model or a block item as an animated model, with
+    /// the entity's default attachments worn.
     pub fn load_animated_report(&self, id: &str) -> Result<(AnimatedModel, LoadReport)> {
+        self.load_animated_with(id, true)
+    }
+
+    /// [`Hytale::load_animated_report`], choosing whether an entity's default attachments are
+    /// composed onto it (`false` gives the bare body, which is how every model loaded before
+    /// attachments were read).
+    pub fn load_animated_with(
+        &self,
+        id: &str,
+        attachments: bool,
+    ) -> Result<(AnimatedModel, LoadReport)> {
         let mut report = LoadReport::default();
         if id.starts_with("Server/Models/") && id.ends_with(".json") {
             let def = self.defs.model_def(&self.assets, id)?;
@@ -364,16 +434,24 @@ impl Hytale {
                     .ok_or_else(|| anyhow!("{id}: no Model"))?,
             );
             let tex = def.texture.as_deref().map(Assets::common);
-            let (rig, tex_path) = self.rig_for(&model_path, tex.as_deref(), 1.0)?;
+            let (mut rig, tex_path) = self.rig_for(
+                &model_path,
+                tex.as_deref(),
+                1.0,
+                def.gradient.as_ref(),
+                &mut report.tint,
+            )?;
             report.texture = tex_path;
-            report.attachments_not_composed = def.attachments.iter().map(|a| a.0.clone()).collect();
+            if attachments {
+                self.compose_attachments(&mut rig, &def, &mut report);
+            }
             let mut am = AnimatedModel::new(rig.model.clone());
             am.model.name = stem(id).to_string();
             self.add_def_clips(&rig, &def, &mut am, &mut report);
             am.validate()?;
             Ok((am, report))
         } else if id.ends_with(".blockymodel") {
-            let (rig, tex_path) = self.rig_for(id, None, 1.0)?;
+            let (rig, tex_path) = self.rig_for(id, None, 1.0, None, &mut None)?;
             report.texture = tex_path;
             let mut am = AnimatedModel::new(rig.model.clone());
             self.add_folder_clips(&rig, id, &mut am, &mut report);
@@ -388,6 +466,118 @@ impl Hytale {
         } else {
             bail!("{id}: not a model, model definition or block (prefabs load as scenes)");
         }
+    }
+
+    /// Wears the entity's `DefaultAttachments` on the rig; see [`Rig::attach`]. What is not worn is
+    /// listed in `report.attachments_left_out` with the reason.
+    fn compose_attachments(&self, rig: &mut Rig, def: &ModelDef, report: &mut LoadReport) {
+        for (set, options) in &def.random_attachment_sets {
+            let names: Vec<&str> = options.keys().map(String::as_str).collect();
+            report.attachments_left_out.push((
+                format!("RandomAttachmentSets/{set}"),
+                format!(
+                    "one of {} is picked per instance and the data gives no pick",
+                    names.join(", ")
+                ),
+            ));
+        }
+        for a in &def.attachments {
+            if let Some(w) = a.weight {
+                report.attachments_left_out.push((
+                    a.model.clone(),
+                    format!("entry has a Weight ({w}), which the data does not explain"),
+                ));
+                continue;
+            }
+            match self.wear(rig, a) {
+                Ok(note) if note.nodes_added == 0 => {
+                    // every piece found no node to hang from, so nothing was added
+                    let why = if note.unmatched_pieces.is_empty() {
+                        "adds nothing: its pieces have no children".to_string()
+                    } else {
+                        format!(
+                            "adds nothing: no node named {}",
+                            note.unmatched_pieces.join(" or ")
+                        )
+                    };
+                    report.attachments_left_out.push((a.model.clone(), why));
+                }
+                Ok(note) => report.attachments.push(note),
+                Err(why) => report.attachments_left_out.push((a.model.clone(), why)),
+            }
+        }
+    }
+
+    fn tinted_texture(
+        &self,
+        tex: Arc<Rgba>,
+        gradient: &GradientRef,
+    ) -> std::result::Result<Rgba, String> {
+        let path = self
+            .defs
+            .gradient_sets(&self.assets)
+            .texture(gradient)
+            .ok_or_else(|| {
+                format!(
+                    "gradient {}/{} is not in {}",
+                    gradient.set,
+                    gradient.id,
+                    crate::defs::GRADIENT_SETS_PATH
+                )
+            })?;
+        let g = self
+            .texture(&Assets::common(path))
+            .map_err(|e| format!("gradient {path}: {e:#}"))?;
+        Ok(tint(&tex, &g))
+    }
+
+    fn wear(
+        &self,
+        rig: &mut Rig,
+        a: &AttachmentDef,
+    ) -> std::result::Result<AttachmentNote, String> {
+        let model_path = Assets::common(&a.model);
+        let bm = self.blocky(&model_path).map_err(|e| format!("{e:#}"))?;
+        let ppu = bm.pixels_per_unit(&model_path);
+        if (1.0 / ppu - rig.scale).abs() > 1e-9 {
+            return Err(format!(
+                "{ppu} pixels per unit, not the base model's {}",
+                1.0 / rig.scale
+            ));
+        }
+        let tex_path = a
+            .texture
+            .as_deref()
+            .map(Assets::common)
+            .or_else(|| self.discover_texture(&model_path));
+        let mut tint_name = None;
+        let tex: Option<Rgba> = match &tex_path {
+            Some(p) => {
+                let t = self.texture(p).map_err(|e| format!("{e:#}"))?;
+                match &a.gradient {
+                    Some(g) => {
+                        tint_name = Some(format!("{}/{}", g.set, g.id));
+                        Some(self.tinted_texture(t, g)?)
+                    }
+                    None => Some((*t).clone()),
+                }
+            }
+            None => None,
+        };
+        let label = tex_path
+            .as_deref()
+            .map(|p| p.rsplit('/').next().unwrap_or(p).to_string())
+            .unwrap_or_else(|| "untextured".into());
+        let rep = rig.attach(&bm, tex.as_ref(), &label);
+        Ok(AttachmentNote {
+            model: model_path,
+            texture: tex_path,
+            tint: tint_name,
+            pieces: rep.pieces,
+            nodes_added: rep.nodes_added,
+            meshes_added: rep.meshes_added,
+            unmatched_pieces: rep.unmatched,
+        })
     }
 
     fn add_clip(
@@ -487,7 +677,13 @@ impl Hytale {
             if let Some(m) = &desc.model {
                 let model_zip = Assets::common(m);
                 let tex = desc.model_texture.as_deref().map(Assets::common);
-                let (rig, _) = self.rig_for(&model_zip, tex.as_deref(), desc.model_scale)?;
+                let (rig, _) = self.rig_for(
+                    &model_zip,
+                    tex.as_deref(),
+                    desc.model_scale,
+                    None,
+                    &mut None,
+                )?;
                 drew |= !rig.model.meshes.is_empty();
                 append_model(&mut model, &rig.model);
             }

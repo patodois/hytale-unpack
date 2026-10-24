@@ -27,6 +27,23 @@ impl Rgba {
     pub fn has_alpha(&self) -> bool {
         self.data.as_chunks::<4>().0.iter().any(|p| p[3] != 255)
     }
+
+    /// The share (0 to 1) of the non-transparent texels whose red, green and blue are equal.
+    /// 0 when there are none.
+    pub fn grey_share(&self) -> f32 {
+        let (mut opaque, mut grey) = (0usize, 0usize);
+        for p in self.data.as_chunks::<4>().0 {
+            if p[3] != 0 {
+                opaque += 1;
+                grey += (p[0] == p[1] && p[1] == p[2]) as usize;
+            }
+        }
+        if opaque == 0 {
+            0.0
+        } else {
+            grey as f32 / opaque as f32
+        }
+    }
 }
 
 pub fn decode_png(bytes: &[u8]) -> Result<Rgba> {
@@ -78,6 +95,32 @@ pub fn decode_png(bytes: &[u8]) -> Result<Rgba> {
     })
 }
 
+/// Tints a greyscale texture with a gradient (`GradientSet` / `GradientId` in the definitions).
+///
+/// The gradients are 256 texels wide ramps from dark to light, and the tinted textures are
+/// greyscale, so a grey texel of value `v` takes the gradient's colour at column `v` (scaled when
+/// the gradient is not 256 wide), keeping its own alpha. Texels that are not grey (red, green and
+/// blue differing) are painted colours and stay as they are: the textures mix both (the player's
+/// skin is grey and its underwear blue). The gradient has 16 identical rows; the first is read.
+///
+/// The data does not describe this mapping; it is the reading that fits the files (a ramp to
+/// index by brightness) and it is checked against the game's own generated icons, see the README.
+pub fn tint(texture: &Rgba, gradient: &Rgba) -> Rgba {
+    let mut out = texture.clone();
+    if gradient.width == 0 || gradient.height == 0 {
+        return out;
+    }
+    let last = (gradient.width - 1) as usize;
+    for px in out.data.as_chunks_mut::<4>().0 {
+        if px[0] != px[1] || px[1] != px[2] {
+            continue;
+        }
+        let col = (px[0] as usize * last + 127) / 255;
+        px[..3].copy_from_slice(&gradient.data[col * 4..col * 4 + 3]);
+    }
+    out
+}
+
 pub fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     {
@@ -102,6 +145,69 @@ mod tests {
         assert_eq!((img.width, img.height), (2, 1));
         assert_eq!(img.data, px);
         assert!(img.has_alpha());
+    }
+
+    fn ramp() -> Rgba {
+        // 256 x 1: column x is (x, 0, 255 - x)
+        let mut data = Vec::new();
+        for x in 0..=255u8 {
+            data.extend_from_slice(&[x, 0, 255 - x, 255]);
+        }
+        Rgba {
+            width: 256,
+            height: 1,
+            data,
+        }
+    }
+
+    #[test]
+    fn tint_maps_grey_texels_through_the_gradient_and_keeps_colours_and_alpha() {
+        let tex = Rgba {
+            width: 3,
+            height: 1,
+            // grey 10 with alpha 200, grey 255, a painted colour
+            data: vec![10, 10, 10, 200, 255, 255, 255, 255, 200, 100, 50, 255],
+        };
+        let t = tint(&tex, &ramp());
+        assert_eq!(&t.data[0..4], &[10, 0, 245, 200]);
+        assert_eq!(&t.data[4..8], &[255, 0, 0, 255]);
+        assert_eq!(&t.data[8..12], &[200, 100, 50, 255]);
+    }
+
+    #[test]
+    fn grey_share_counts_grey_among_the_non_transparent_texels() {
+        let tex = Rgba {
+            width: 4,
+            height: 1,
+            data: vec![
+                9, 9, 9, 255, 9, 9, 9, 128, 1, 2, 3, 255, // 2 grey, 1 colour
+                7, 7, 7, 0, // transparent: not counted
+            ],
+        };
+        assert!((tex.grey_share() - 2.0 / 3.0).abs() < 1e-6);
+        let none = Rgba {
+            width: 1,
+            height: 1,
+            data: vec![0, 0, 0, 0],
+        };
+        assert_eq!(none.grey_share(), 0.0);
+    }
+
+    #[test]
+    fn tint_scales_the_column_for_a_narrower_gradient() {
+        let grad = Rgba {
+            width: 2,
+            height: 1,
+            data: vec![1, 2, 3, 255, 9, 8, 7, 255],
+        };
+        let tex = Rgba {
+            width: 2,
+            height: 1,
+            data: vec![0, 0, 0, 255, 255, 255, 255, 255],
+        };
+        let t = tint(&tex, &grad);
+        assert_eq!(&t.data[0..3], &[1, 2, 3]);
+        assert_eq!(&t.data[4..7], &[9, 8, 7]);
     }
 
     #[test]

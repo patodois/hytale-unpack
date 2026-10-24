@@ -42,6 +42,9 @@ enum Cmd {
         /// Only add clips whose name contains this text
         #[arg(long)]
         clips: Option<String>,
+        /// Leave an entity's default attachments (eyes, hair, armour, ...) off
+        #[arg(long)]
+        no_attachments: bool,
     },
     /// Print an animation clip
     Anim {
@@ -459,6 +462,7 @@ fn run_bridge(cmd: Cmd, path: &std::path::Path) -> Result<()> {
             out,
             no_anim,
             clips,
+            no_attachments,
         } => {
             let id = match hy
                 .defs()
@@ -473,7 +477,7 @@ fn run_bridge(cmd: Cmd, path: &std::path::Path) -> Result<()> {
                     &["", ".json", ".blockymodel"],
                 )?,
             };
-            let (mut am, report) = hy.load_animated_report(&id)?;
+            let (mut am, report) = hy.load_animated_with(&id, !no_attachments)?;
             if let Some(c) = &clips {
                 am.animations.retain(|a| a.name.contains(c.as_str()));
             }
@@ -543,11 +547,33 @@ fn run_bridge(cmd: Cmd, path: &std::path::Path) -> Result<()> {
             for (_, why) in &report.skipped_clips {
                 println!("  clip skipped: {why}");
             }
-            if !report.attachments_not_composed.is_empty() {
-                println!(
-                    "  default attachments not composed: {}",
-                    report.attachments_not_composed.join(", ")
-                );
+            if let Some(t) = &report.tint {
+                println!("  texture tinted with gradient {t}");
+            }
+            if !report.attachments.is_empty() {
+                println!("  attachments worn: {}", report.attachments.len());
+                for a in &report.attachments {
+                    let short = a.model.rsplit('/').next().unwrap_or(&a.model);
+                    println!(
+                        "    {short}: {} pieces merged, {} nodes, {} meshes{}",
+                        a.pieces,
+                        a.nodes_added,
+                        a.meshes_added,
+                        a.tint
+                            .as_ref()
+                            .map(|t| format!(", tinted {t}"))
+                            .unwrap_or_default()
+                    );
+                    if !a.unmatched_pieces.is_empty() {
+                        println!(
+                            "      pieces with no node of that name: {}",
+                            a.unmatched_pieces.join(", ")
+                        );
+                    }
+                }
+            }
+            for (what, why) in &report.attachments_left_out {
+                println!("  attachment left out: {what}: {why}");
             }
             if let Some(dir) = out {
                 let name = hytale_unpack::bridge::stem(&id).to_string();
@@ -614,6 +640,9 @@ fn cmd_check_bridge(hy: &hytale_unpack::bridge::Hytale, scenes: Option<f64>) -> 
     let mut fails: Vec<String> = Vec::new();
     let mut clips = 0usize;
     let mut instances = 0u64;
+    let (mut with_attachments, mut worn, mut pieces, mut unmatched, mut with_left_out) =
+        (0u64, 0u64, 0u64, 0u64, 0u64);
+    let mut left_out = std::collections::BTreeMap::<&str, u64>::new();
     let mut unresolved = std::collections::BTreeMap::<String, u64>::new();
     let names: Vec<String> = hy.assets().names().map(String::from).collect();
     let mut n = 0;
@@ -664,6 +693,31 @@ fn cmd_check_bridge(hy: &hytale_unpack::bridge::Hytale, scenes: Option<f64>) -> 
         } else {
             hy.load_animated_report(id).and_then(|(am, r)| {
                 clips += r.clips;
+                if !r.attachments.is_empty() {
+                    with_attachments += 1;
+                    worn += r.attachments.len() as u64;
+                    pieces += r.attachments.iter().map(|a| a.pieces as u64).sum::<u64>();
+                    unmatched += r
+                        .attachments
+                        .iter()
+                        .map(|a| a.unmatched_pieces.len() as u64)
+                        .sum::<u64>();
+                }
+                if !r.attachments_left_out.is_empty() {
+                    with_left_out += 1;
+                }
+                for (what, why) in &r.attachments_left_out {
+                    let key = if what.starts_with("RandomAttachmentSets/") {
+                        "random set (no pick in the data)"
+                    } else if why.contains("Weight") {
+                        "weighted entry"
+                    } else if why.starts_with("adds nothing") {
+                        "pieces with no node to attach to"
+                    } else {
+                        "other"
+                    };
+                    *left_out.entry(key).or_default() += 1u64;
+                }
                 Ok(am.validate()?)
             })
         };
@@ -689,6 +743,9 @@ fn cmd_check_bridge(hy: &hytale_unpack::bridge::Hytale, scenes: Option<f64>) -> 
         println!("{label:<18} ok {:>6}  failed {:>5}", ok[i], failed[i]);
     }
     println!("{clips} clips built, {instances} scene instances");
+    println!(
+        "attachments: {with_attachments} models wear {worn} ({pieces} pieces merged, {unmatched} pieces with no node of that name); {with_left_out} models have entries left out: {left_out:?}"
+    );
     if !unresolved.is_empty() {
         let total: u64 = unresolved.values().sum();
         println!(

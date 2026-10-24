@@ -80,10 +80,32 @@
 //!
 //! # Attachments
 //!
-//! Cosmetics and equipment are separate models whose nodes with `isPiece: true` attach to the
-//! node of the same name in the model they are worn on (the plugin's tooltip: "the node will be
-//! attached to a node of the same name when displayed as an attachment in-game"). This crate
-//! reads the flag but does not compose attachments.
+//! Cosmetics, armour and the like are separate models worn by another one: an entity definition
+//! lists them under `DefaultAttachments` ([`crate::defs`]). A node with `shape.settings.isPiece:
+//! true` attaches to the node of the same name in the model it is worn on (the plugin's tooltip:
+//! "the node will be attached to a node of the same name when displayed as an attachment
+//! in-game"). What the plugin does with such a node, which is what this crate does
+//! (`Rig::attach` in `src/rig.rs`):
+//!
+//! - the piece is looked up by name among the nodes that exist already, the first in tree order
+//!   (the body, then earlier attachments, so a cosmetic can hang from an ear that another
+//!   attachment brought); it may sit at any depth of the attachment's tree;
+//! - the piece itself disappears into that node: its own `position`, `orientation` and
+//!   `shape.offset` are not used. They are where the piece was modelled, and they do not agree
+//!   with the node it goes to (the face's `Head` piece is at y 79 px, the player's head pivot at
+//!   87); of the 2,060 pieces worn by entities 439 are rotated and 577 have an offset;
+//! - its children hang from that node, positioned like the children of any node, relative to its
+//!   pivot plus its shape offset. That is why a face quad authored 20 px below its `Head` piece
+//!   lands on the front of the head box: the head's offset (20 px) is added;
+//! - a node that is not a piece is an ordinary node of the attachment. A root keeps its own
+//!   position and orientation, relative to the model's origin;
+//! - a piece with no node of that name has nothing to attach to. The plugin shows it as a loose
+//!   group, the data says no more, and this crate leaves it and what hangs below it out (the
+//!   optional ear accessories' anchors; the held-item pieces `R-Attachment` of weapons worn by
+//!   projectile stand-ins).
+//!
+//! Animations address nodes by name, so a clip that moves `L-Eye` or `Hair-B` moves those nodes
+//! of the attachment, and `Head` moves everything hung from the head.
 //!
 //! The plugin limits a model to 255 nodes (one per group plus one per extra cube); the largest
 //! file in the install has 239.

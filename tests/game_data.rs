@@ -463,3 +463,209 @@ fn prefab_cells_are_placed_where_the_prefabs_own_entities_stand() {
     assert!((here[0] - f64::from(t[0])).abs() < 0.5 && (here[2] - f64::from(t[2])).abs() < 0.5);
     assert!((here[1] - f64::from(t[1]) - 1.0).abs() < 1e-4);
 }
+
+// ---- attachments ----
+
+/// World position of a node at rest. The rest rotations along the player's spine and head are the
+/// identity, so adding translations is enough for those chains.
+fn rest_position(m: &rewrite_bridge::Model, node: usize) -> [f32; 3] {
+    let w = &hytale_unpack::gltf::world_matrices(m)[node];
+    [w[12], w[13], w[14]]
+}
+
+fn node_named(m: &rewrite_bridge::Model, name: &str) -> usize {
+    m.nodes
+        .iter()
+        .position(|n| n.name == name)
+        .unwrap_or_else(|| panic!("no node {name}"))
+}
+
+#[test]
+fn the_player_wears_its_five_default_attachments() {
+    let hy = need!();
+    let (am, report) = hy
+        .load_animated_report("Server/Models/Human/Player.json")
+        .unwrap();
+    let worn: Vec<_> = report
+        .attachments
+        .iter()
+        .map(|a| a.model.rsplit('/').next().unwrap())
+        .collect();
+    assert_eq!(
+        worn,
+        [
+            "Player_Face_Detached.blockymodel",
+            "Ears1.blockymodel",
+            "Mouth1.blockymodel",
+            "Eyes.blockymodel",
+            "Eyebrows_Medium.blockymodel"
+        ]
+    );
+    assert!(report.attachments_left_out.is_empty());
+    // the two ear accessory anchors have nothing to attach to: the accessories are optional
+    assert_eq!(
+        report.attachments[1].unmatched_pieces,
+        ["R-Ear-EarAccessory", "L-Ear-EarAccessory"]
+    );
+    // the body is tinted with the skin gradient, the eyes with theirs
+    assert_eq!(report.tint.as_deref(), Some("Skin/02"));
+    assert_eq!(
+        report.attachments[3].tint.as_deref(),
+        Some("Eyes_Gradient/Brown")
+    );
+    am.validate().unwrap();
+
+    // the face quad hangs from the head and lies on the head box's front face: the head's pivot
+    // is at y 87 px, its box is 28 px deep and centred 2 px forward of z = -1, so its front is
+    // at z = 15 px and the quad (a 28 px high quad centred 20 px above the pivot) at 13 + 2
+    let m = &am.model;
+    let face = node_named(m, "Face");
+    assert_eq!(m.nodes[face].parent, Some(node_named(m, "Head")));
+    let p = rest_position(m, face);
+    assert!((p[1] - 87.0 / 64.0).abs() < 0.002, "face pivot y {}", p[1]);
+    assert!((p[2] - 13.0 / 64.0).abs() < 0.002, "face pivot z {}", p[2]);
+
+    // an eye hangs from the player's own `L-Eye-Attachment` node, below the head
+    let eye = node_named(m, "L-Eye");
+    let mut up = m.nodes[eye].parent;
+    let mut chain = Vec::new();
+    while let Some(i) = up {
+        chain.push(m.nodes[i].name.as_str());
+        up = m.nodes[i].parent;
+    }
+    assert!(
+        chain.contains(&"L-Eye-Attachment") && chain.contains(&"Head"),
+        "{chain:?}"
+    );
+
+    // the clips move attachment nodes by name, so they are no longer reported missing
+    assert!(!report
+        .missing_nodes
+        .iter()
+        .any(|n| n == "L-Eye" || n == "Mouth"));
+    assert!(am
+        .animations
+        .iter()
+        .any(|a| a.channels.iter().any(|c| c.node == eye)));
+}
+
+#[test]
+fn the_body_without_attachments_is_what_loaded_before() {
+    let hy = need!();
+    let id = "Server/Models/Human/Player.json";
+    let (with, _) = hy.load_animated_with(id, true).unwrap();
+    let (bare, report) = hy.load_animated_with(id, false).unwrap();
+    assert!(report.attachments.is_empty() && report.attachments_left_out.is_empty());
+    assert_eq!(bare.model.nodes.len(), 57);
+    assert_eq!(bare.model.meshes.len(), 21);
+    assert!(with.model.nodes.len() > bare.model.nodes.len());
+    // the body's own nodes and meshes come first and are unchanged
+    assert_eq!(with.model.nodes[..57], bare.model.nodes[..]);
+    assert_eq!(with.model.meshes[..21], bare.model.meshes[..]);
+}
+
+#[test]
+fn an_attached_model_is_drawn_with_its_own_texture() {
+    let hy = need!();
+    let (am, report) = hy
+        .load_animated_report("Server/Models/Intelligent/Trork/Trork_Chieftain.json")
+        .unwrap();
+    assert!(report.attachments.len() >= 6);
+    // one material set for the body, more for each attachment, and every UV inside its texture
+    assert!(am.model.materials.len() > report.attachments.len());
+    for m in &am.model.meshes {
+        assert!(m
+            .uvs
+            .iter()
+            .all(|uv| (0.0..=1.0).contains(&uv[0]) && (0.0..=1.0).contains(&uv[1])));
+    }
+    for a in &report.attachments {
+        assert!(
+            a.pieces > 0 || a.nodes_added > 0,
+            "{} adds nothing",
+            a.model
+        );
+    }
+    am.validate().unwrap();
+}
+
+#[test]
+fn only_greyscale_textures_take_the_entitys_gradient() {
+    let hy = need!();
+    let tint = |id: &str| hy.load_animated_report(id).unwrap().1.tint;
+    // the player's skin gradient is inherited by the Trork, whose texture is painted in colour
+    assert_eq!(
+        tint("Server/Models/Human/Player.json").as_deref(),
+        Some("Skin/02")
+    );
+    assert_eq!(
+        tint("Server/Models/Instances/Forgotten_Temple/Temple_Mithril_Guard.json").as_deref(),
+        Some("Skin/02")
+    );
+    assert_eq!(tint("Server/Models/Intelligent/Trork/Trork.json"), None);
+    assert_eq!(tint("Server/Models/Undead/Skeleton.json"), None);
+}
+
+#[test]
+fn what_cannot_be_composed_is_listed_with_the_reason() {
+    let hy = need!();
+    // a set of alternatives with no pick in the data
+    let (am, report) = hy
+        .load_animated_report("Server/Models/Livestock/Sheep.json")
+        .unwrap();
+    assert!(report.attachments.is_empty());
+    assert_eq!(report.attachments_left_out.len(), 1);
+    assert_eq!(
+        report.attachments_left_out[0].0,
+        "RandomAttachmentSets/Fleece"
+    );
+    am.validate().unwrap();
+    // an entry with a Weight
+    let (_, report) = hy
+        .load_animated_report("Server/Models/NPC_Santa.json")
+        .unwrap();
+    assert!(report
+        .attachments_left_out
+        .iter()
+        .any(|(what, why)| what.contains("MediumCurly") && why.contains("Weight")));
+    assert!(!report.attachments.is_empty());
+    // a held-item model whose `R-Attachment` piece finds no such node in a projectile adds nothing
+    let (am, report) = hy
+        .load_animated_report("Server/Models/Projectiles/Weapons/Dagger/Dagger_Iron.json")
+        .unwrap();
+    assert!(report.attachments.is_empty());
+    assert_eq!(report.attachments_left_out.len(), 1);
+    assert!(report.attachments_left_out[0].1.contains("R-Attachment"));
+    assert_eq!(am.model.nodes.len(), 2);
+}
+
+#[test]
+fn every_entity_with_attachments_loads_and_validates() {
+    let hy = need!();
+    let (mut wearing, mut worn, mut random) = (0, 0, 0);
+    let mut paths: Vec<String> = hy.defs().model_paths().map(String::from).collect();
+    paths.sort();
+    for id in &paths {
+        let def = hy.defs().model_def(hy.assets(), id).unwrap();
+        if def.model.is_none() {
+            continue;
+        }
+        let (am, report) = hy.load_animated_report(id).unwrap();
+        am.validate().unwrap_or_else(|e| panic!("{id}: {e}"));
+        // every entry is either worn or listed as left out, nothing vanishes
+        assert_eq!(
+            report.attachments.len() + report.attachments_left_out.len(),
+            def.attachments.len() + def.random_attachment_sets.len(),
+            "{id}"
+        );
+        if !report.attachments.is_empty() {
+            wearing += 1;
+        }
+        worn += report.attachments.len();
+        random += def.random_attachment_sets.len();
+    }
+    // counts of the install this was written against (README); a newer game may add more
+    assert!(wearing >= 179, "{wearing}");
+    assert!(worn >= 719, "{worn}");
+    assert!(random >= 44, "{random}");
+}
