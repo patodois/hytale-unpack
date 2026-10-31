@@ -37,6 +37,17 @@ Each archive holds the program, this README, both license files and an `INSTALL.
 the checksum of every archive (`shasum -a 256 -c SHA256SUMS` on macOS, `sha256sum -c SHA256SUMS` on Linux,
 `Get-FileHash` on Windows). They are built with the `bridge` feature (the default), so the rewrite-bridge provider and the glTF export are included.
 
+`SHA256SUMS.sig` on the same release signs `SHA256SUMS` with the project's Ed25519 release key, so you can also check
+that the list itself came from here. With the downloads in one folder (needs OpenSSL 3):
+
+```sh
+sh tools/verify-release.sh hytale-unpack v0.2.0 path/to/folder
+```
+
+The signed text is `osp release patodois/hytale-unpack <tag>`, a newline, then `SHA256SUMS`, so a signature from another release
+does not verify. The public key is in `RELEASE-KEY.pem` (SHA-256 of its DER form
+`26c35ed9930be42fd266852135e2e81eb74c36ed9a2d0c527e86210a3dcb0946`), and the script carries the same key.
+
 **The binaries contain no game data.** They are the program only; it reads the files of a copy of Hytale that you already have
 installed.
 
