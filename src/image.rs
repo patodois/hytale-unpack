@@ -29,20 +29,42 @@ impl Rgba {
     }
 }
 
+/// The most a decoded texture may take (RGBA, 8 bits): 128 MiB, a 5792 x 5792 image. The biggest
+/// textures of the game are far below it.
+const MAX_DECODED: usize = 128 << 20;
+
+/// How many bytes a PNG of `n` bytes can decode to at most, whatever its header says.
+///
+/// The image data is zlib-compressed (PNG specification, section 10.3), i.e. DEFLATE, in which a
+/// match costs at least two bits (a length/literal code and a distance code of one bit each, RFC
+/// 1951 section 3.2.5) and copies at most 258 bytes: 1032 bytes of filtered scanlines per input
+/// byte. Expanding to 8-bit RGBA multiplies that by at most 32 (a 1-bit palette index becomes
+/// four bytes).
+fn decodable_from(n: usize) -> usize {
+    n.saturating_mul(1032 * 32)
+}
+
 pub fn decode_png(bytes: &[u8]) -> Result<Rgba> {
     let mut dec = png::Decoder::new(Cursor::new(bytes));
     dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = dec.read_info()?;
-    let mut buf = vec![
-        0;
-        reader
-            .output_buffer_size()
-            .ok_or_else(|| anyhow::anyhow!("PNG too large"))?
-    ];
+    // The header alone says how big the output is; do not allocate it before it is believable
+    let size = reader
+        .output_buffer_size()
+        .ok_or_else(|| anyhow::anyhow!("PNG too large"))?;
+    if size > MAX_DECODED || size > decodable_from(bytes.len()) {
+        bail!(
+            "PNG header declares {} x {} pixels, more than a {} byte file can hold",
+            reader.info().width,
+            reader.info().height,
+            bytes.len()
+        );
+    }
+    let mut buf = vec![0; size];
     let info = reader.next_frame(&mut buf)?;
     buf.truncate(info.buffer_size());
     let (w, h) = (info.width, info.height);
-    let px = (w * h) as usize;
+    let px = w as usize * h as usize;
     let data = match info.color_type {
         png::ColorType::Rgba => buf,
         png::ColorType::Rgb => {
@@ -176,6 +198,64 @@ mod tests {
         let t = tint(&tex, &grad);
         assert_eq!(&t.data[0..3], &[1, 2, 3]);
         assert_eq!(&t.data[4..7], &[9, 8, 7]);
+    }
+
+    /// CRC-32 of the PNG specification (section 5.5), bit by bit
+    fn crc32(data: &[u8]) -> u32 {
+        let mut c = 0xffff_ffffu32;
+        for &b in data {
+            c ^= b as u32;
+            for _ in 0..8 {
+                c = if c & 1 != 0 {
+                    0xedb8_8320 ^ (c >> 1)
+                } else {
+                    c >> 1
+                };
+            }
+        }
+        !c
+    }
+
+    fn chunk(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        let mut out = (body.len() as u32).to_be_bytes().to_vec();
+        let mut crc_in = kind.to_vec();
+        crc_in.extend_from_slice(body);
+        out.extend_from_slice(&crc_in);
+        out.extend_from_slice(&crc32(&crc_in).to_be_bytes());
+        out
+    }
+
+    /// A PNG whose header declares `w` x `h` 8-bit RGBA pixels and whose data is a few bytes
+    fn declaring(w: u32, h: u32) -> Vec<u8> {
+        let mut ihdr = w.to_be_bytes().to_vec();
+        ihdr.extend_from_slice(&h.to_be_bytes());
+        ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        png.extend(chunk(b"IHDR", &ihdr));
+        png.extend(chunk(b"IDAT", &[0x78, 0x9c, 0x62, 0x00, 0x00]));
+        png.extend(chunk(b"IEND", &[]));
+        png
+    }
+
+    /// Found by fuzzing (`fuzz/crashes/png/huge-dimensions-alloc`: a header of 63234 x
+    /// 4244635652 pixels in 46 bytes): `decode_png` asked for the whole output buffer, about a
+    /// petabyte, before reading any data. The fuzz build of the `png` crate skips the CRC check,
+    /// so the test uses a file with valid CRCs.
+    #[test]
+    fn a_header_that_declares_more_than_the_file_can_hold_is_an_error() {
+        let err = decode_png(&declaring(63234, 4_244_635_652)).unwrap_err();
+        assert!(format!("{err:#}").contains("more than a"), "{err:#}");
+        // 16384 x 16384 RGBA is 1 GiB: past the cap, though a legal PNG header
+        assert!(decode_png(&declaring(16384, 16384)).is_err());
+    }
+
+    #[test]
+    fn a_big_solid_texture_still_decodes() {
+        // 2048 x 2048 of one colour compresses to a few kilobytes
+        let px = vec![7u8; 2048 * 2048 * 4];
+        let png = encode_png(2048, 2048, &px).unwrap();
+        assert!(png.len() < 100_000);
+        assert_eq!(decode_png(&png).unwrap().data.len(), px.len());
     }
 
     #[test]

@@ -3,3 +3,6 @@
 /render/node_modules
 /render/package-lock.json
 /dist
+/fuzz/target
+/fuzz/artifacts
+/fuzz/corpus

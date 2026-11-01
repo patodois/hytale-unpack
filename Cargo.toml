@@ -5,6 +5,7 @@ edition = "2021"
 description = "Reader for Hytale's Assets.zip: blocky models, animations and prefabs, with a rewrite-bridge provider"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
+exclude = ["/fuzz"]
 
 [dependencies]
 anyhow = "1"

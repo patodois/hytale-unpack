@@ -1,0 +1,72 @@
+[package]
+name = "hytale-unpack-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+rewrite-bridge = "0.2.1"
+serde_json = { version = "1", features = ["preserve_order"] }
+zip = { version = "8", default-features = false, features = ["deflate"] }
+
+[dependencies.hytale-unpack]
+path = ".."
+
+# Not part of the root workspace, so `cargo build`/`cargo test`/CI never touch it
+[workspace]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "blockymodel"
+path = "fuzz_targets/blockymodel.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "blockyanim"
+path = "fuzz_targets/blockyanim.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "prefab"
+path = "fuzz_targets/prefab.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "png"
+path = "fuzz_targets/png.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "defs_json"
+path = "fuzz_targets/defs_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "assets_zip"
+path = "fuzz_targets/assets_zip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "archive_load"
+path = "fuzz_targets/archive_load.rs"
+test = false
+doc = false
+bench = false

@@ -518,9 +518,11 @@ pub fn shape_faces(shape: &Shape) -> Vec<Face> {
                 _ => "front",
             };
             // The quad's two extents become the box extents of the other two axes
-            let dims = match &normal[normal.len().saturating_sub(1)..] {
-                "X" => [0.0, size.y, size.x],
-                "Y" => [size.x, 0.0, size.y],
+            // The axis is the last byte of the name; compared as bytes, because the name is
+            // untrusted and its last character may be wider than one byte
+            let dims = match normal.as_bytes().last() {
+                Some(b'X') => [0.0, size.y, size.x],
+                Some(b'Y') => [size.x, 0.0, size.y],
                 _ => [size.x, size.y, 0.0],
             };
             let Some(layout) = shape.texture_layout.get("front") else {
@@ -665,6 +667,32 @@ mod tests {
         let zs: Vec<f32> = faces[0].positions.iter().map(|p| p[2]).collect();
         assert!(zs.contains(&6.0) && zs.contains(&-6.0));
         assert!(faces[0].positions.iter().all(|p| p[0] == 0.0));
+    }
+
+    /// Found by fuzzing: slicing the last byte of a `normal` that ends in a multi-byte character
+    /// (`"é"`) panicked ("byte index 1 is not a char boundary")
+    #[test]
+    fn a_quad_normal_that_ends_in_a_wide_character_is_not_an_axis() {
+        let mut shape = Shape {
+            kind: ShapeType::Quad,
+            settings: Settings {
+                size: Some(V3 {
+                    x: 2.0,
+                    y: 3.0,
+                    z: 0.0,
+                }),
+                normal: Some("é".into()),
+                ..Settings::default()
+            },
+            ..Shape::default()
+        };
+        shape
+            .texture_layout
+            .insert("front".into(), FaceLayout::default());
+        let faces = shape_faces(&shape);
+        assert_eq!(faces.len(), 1);
+        assert_eq!(faces[0].side, "front");
+        assert!(faces[0].positions.iter().all(|p| p[2] == 0.0));
     }
 
     #[test]

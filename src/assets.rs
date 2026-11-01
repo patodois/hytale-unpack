@@ -148,7 +148,11 @@ impl Assets {
         }
         let mut zip = self.zip.lock().unwrap();
         let mut f = zip.by_index(i).with_context(|| format!("opening {name}"))?;
-        let mut buf = Vec::with_capacity(self.sizes[i] as usize);
+        // The size in the central directory is only a claim: reserve what the stored bytes can
+        // justify (a DEFLATE stream expands by at most 1032 times, see `image::decodable_from`),
+        // and let the vector grow if the entry really is that big
+        let reserve = self.sizes[i].min(f.compressed_size().saturating_mul(1032));
+        let mut buf = Vec::with_capacity(reserve as usize);
         f.read_to_end(&mut buf)
             .with_context(|| format!("reading {name}"))?;
         Ok(buf)
