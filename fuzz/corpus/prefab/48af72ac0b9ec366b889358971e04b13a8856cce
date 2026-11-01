@@ -1,0 +1,1 @@
+{"version":9,"b.ockIdVersion":11,"anchorX":4,"anchorY":10,"anchorZ":-4,"blocks":[{"x":0,"y":10,"z":2,"name":"Rock_Slate"},{"x":1,"y":10,"z":2,"name":"Blk","components":{"nmoConpets":{"FarmingBlock":{}}}},{"x":2,"y":10,"z":2,"name":"Blk","rotationown":[1,2,3]}

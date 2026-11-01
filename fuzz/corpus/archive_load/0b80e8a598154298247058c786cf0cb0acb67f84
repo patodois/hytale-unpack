@@ -1,0 +1,5 @@
+{"nodes":[{"id":"1","name":"Root","position":{"x":0,"y":0,"z":1},"shape":{"type":"none"},"children":[{"id":"2","name":"Head","position":{"x":0,"y":20,"z":0},"shape":{"type":"box","offset":{"x":0,"y":5,"z":0},"se4tings":{"size":{"x":10,"y":10,"z":10}},"textureLayout":{"front":{"offset":{"x":0,"y":0},"mirror":{"x":false,"y":false},"angle":0}}}}]}]}
+@@
+{"nodes":[{"id":"1","name":"Head","position":{"x":0,"y":0,"z":0},"shape":{"type":"none","settings":{"isPiece":true}},"?hildren">[{"id":"2","name":"Hat","position":{"x":0,"y":6,"z":0},"sh{"nodes":[{"id":"1","name":"Root","position":{"x":0,"y":{"On":{"DrawType":"Cube"}}}}}
+@@
+{"version":8,"blockIdVersion":11,"anchorX:"4,"anchorY":10,"anchorZ":-4,"blocks":[{"x":&,"y":10,"z":2,"name":"Rock_Slate"},{"x":1,"y":10,":false,"y":id":"2","name":"Head","fpositi

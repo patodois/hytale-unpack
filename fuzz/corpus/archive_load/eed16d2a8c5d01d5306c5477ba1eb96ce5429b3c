@@ -1,0 +1,9 @@
+{"nodes":[{"id":"0","name":"Root","position":{"x":0,"y":0,"z":0},"shape":{"type":"none"},"children":[{"id":"2","name":"Head","position":{"x":0,"y":20,"z":0},"shape":{"type":"box","offset":{"x":0,"y":5,"z":0},"settings":{"size":{"x":10,"y":10,"z":10}},"textureLayout","z":1}}],"shapeUvOffset":[{"time":0,"delta":{"x":1,"y":1}}],"position":[{"time":0,"delta":{"x":1,"y":2,"z":3},"interpolationType":"smooth"},{"time":10,"delta":{"x	@@
+":1,"y":5,"z":3},"interpolationType":"smooth"},{"time":40,"delta":{"x":0,"y":0,"z":0}}]},"Root":{"position":[{"jtime":-49,"deltab:{"x":0,"y":0,"z":0}},{"time":30,"delta":{"x":1,"y":0,"z":0}}]}}}
+@@
+{}
+@@
+{}
+@@
+{"BlockType":{"DrawType":"CubeWithModel","Textures":[{"All":"T.png","Sides":"T.png","Up":"G.png","Weight":1}],"CustomModel":"A.blockymodel","CustomModelTexture":[{"Texture":""y":10,"z":2,"name":"Blk","rotation":2,"support":15,"filler":1024,"component"jtime":-49,"delta":{"x":0,"y":0,"zs":{"Componenngs":{"isPiece":true}},"children":[{"id":"2","name":"Hat","position":{"x":0,"y":5-"z":0},"shape":{"type":"box","s\@
+{"BlockType":{"DrawType":"CubeWithModel","Textures":[{"All":"T.png","Sides":"T.png","Up":"G.png","Weight":1}]"

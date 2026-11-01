@@ -1,0 +1,1 @@
+{"version":8,"blockMdVersion":11,"anchorX":4,"anchorY":10,"aocks":[{"x":0,"y":10,"z":2,"name":"Rock_Slate"},{"x":1,"fluids":[{"x":1,"y":1,"z":-4,"name":"Water_Source","level":1}],"entities":[{"Components":{"Nameplate":{"Text":"Klops"}}}],"unknown":[1,2,3]}

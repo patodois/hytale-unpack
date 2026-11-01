@@ -1,0 +1,5 @@
+{"nodes":[{"id":"1","name":"Root","position":{"x":5,"y":0,"z":0},"shape":{"type":"none"},"chidlren":[{"id":"2","nameeight":0.5}],"RandomAttachmentSets":{"cS":{"o":{"Model":"B.blockymodel"},"n":{}}},"AnimationSets":{"Idle":{"Animations":[{"Animation":"C.blockyanim","Speed":0.5,"Looping":true}]}},"HitBox":{"Min":{"Y":0},"Max":{"Y":2}}}
+@@delta":{"x":1,"y":1,"z":1}},{"time":20,"delta":{"x":2,"y":1,"z":1}}],"shapeUvOffset":[{"time":0,"delta":{"x"n":{"DrawType":"Cube"}}}}}
+@@
+{"version":8,"blockIdVersion":
+{"format":"prop","nodes":[{"id":1,"name":"","position":{"x":0,"y":0,"z":0},"shape":{"type":"none"},þÿÿó"children":[{"id":"2","name":"Heae","position":{"x":0,"y":20,"z":0},"shape":{"type":"box","offset"::{"x":0,"y":0,"z":0},"shape":{"type":"none":{"x":x":0

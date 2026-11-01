@@ -1,0 +1,7 @@
+{"nodes":[{"id":"0","name":"Root","position":{"x":0,"y":0,"z":0},"shape":{"type":"none"},"children":[{"id":"2"Æ"name":"Head","position":{"x":0,"y":20,"z":0},"shape":{"type":"box","offset":{"x":0,"y":5,"z":0},"settings":{"size":{"x":10,"y":10,"z":10}},"textureLayout":{"front"e":"quad"ìÿ¿ÿttings":{"size":{"x":8,"y":4,"z":0},"normal":"-X"},"textureLayout":{"front":{"offset":{"x":2,"y":3},"mirror":{"x":true,"y":false},"angle":90,"trans:true}},"doubleSided":true}}]}
+@@
+{"formatVersion":1,"duration":60,"holdLastKeyframe":t{}
+@@
+{"BlockType":{"DrawType":"CubeWithModel","Textures":[{"All":"T.png","Sides":"T.png","Up":"G.png","Weight":1}],"CustomModel":"A.blockymodel","CustomModelTexture":[{"Texture":"T.png"}],"CustomModelScale":2.0,"State":{"Definitions":{"On":{"DrawType":"Cube"}}}}}
+@@
+{"version":8,"blockIdVersion":11,"anchorX":4,"anchorY":10,"anchorZ":-4,"blocksÛ¶mÛ¶mÛîj øk@şˆßæ—AøiP~Œïç›!øjH¾ŠÏ†æ“aøhX>÷†çxkDŞ‰×Fæ•QxiT^çFç™1xjL‹ÇÆæ‘qxh\ûÆç	¸kBî˜ˆÛ&æ–I¸iR{"nodes":[{"id":"1","name":"Root","position":{"x":0,"y":0,"z":0},"shape&:{"type":unone"},"children":[{"id":"2","name":"Head","position":{"x":0,"y":20,"z":0},"shape":{"type":"box","offset":{"x":0,"y":5,"z":0},"settings":{"size":{"x":10,"y":10,"z":10}},"textureLayout":{"front":{"offsÿÿÿÿÿÿÿet":{"x":0,"y":0},"mirror":{"x":false,"y":fal

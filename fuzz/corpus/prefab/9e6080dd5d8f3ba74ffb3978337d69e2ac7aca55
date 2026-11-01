@@ -1,0 +1,1 @@
+{"vers":-4,"blocks":[{"x":0,"y":10,"z":2,"name":"Rock_Slate"},{"x":1,"y":10,"z":2,"name":"Blk","romponents":{"Cfelleromponents":{"FarmingBlock":{}}}},{"x":2,"y":10,"z":2,"name":"Blk","rotation":9}],"fluids":[{"x":1,"y":1,"z":-4,"name":"Water_Source","level":1}],"entities":[{"Components":{"Nameplate":{"":15,"fill:{"Componunknown":[1,2,3]}

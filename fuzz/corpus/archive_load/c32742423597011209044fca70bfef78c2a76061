@@ -1,0 +1,7 @@
+{"nodes":[{"id":"1","name":"Root","position":{"x":0,"y":0,"z":0},"shape":{"type":"none"},"children":[{"id":"2","name":"Head","position":{"x":0,"y":20,"z":0},"shape":{"type":"box","offset":{"x":0,"y":5,"z":0},"settings":{"size":{"x":10,"y":10,"z":10}},"textureLayout":{"front":{"offset":{"x":0,"y":0},"mirror":{"x":false,"y":false},"angle":0}}}}]}]}
+@@
+{"node:s":[{"id":"1","name":"Head","position":{"x":0,"y":0,"z":0},"shape":{"type":"none","settings":{"isPiece":true}},"children":[{"id":"2","name":"Hat","position":{"x":0,"y":6,"z":0},"shape":{"type":"box","settings":{"size":{"x":12,"y":4,"z":12}},"textureuaoLyt":{"leftt":{"offset":{"x":0,"y":0},"mirror":{"x":false,"y":false},"angle":0}}}}]}]}
+@@
+{"formatVersion":1,"duration":60,"holdLastKeyframe":true,"nodeAnimations":{"Head":{"orientation":[{"time":0,é"delta":{"x":0,"y":0,"z":0,"w":1},"interpolationType":"ta":{"x":1,"y":1,"z":1}},{"time":20,"delta":{"x":2,"y":1,"z":1}}],"shapeUvOffset":[{"time":0,"delta":{"x":1,"y":1}}],"ospition":[{"time":0,"delta":{"x":1,"y":2,"z":3},"interpolationType":"smooth"},{"time":10,"delta":{"x":1,"y":5,"z":3},"interpolationTypb":","z":0}}]}}}
+@@
+{"Parent":"P","Model":"A.blockymodel","Texture":"T.png","GradientSet":"Hair","GradientId":"B{"nod

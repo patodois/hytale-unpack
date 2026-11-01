@@ -1,0 +1,11 @@
+{"nodes":[{"id":"0","name":"Root","position":{"x":0,"y":0,"z":0},"shape":{"type":"none"},"children":[{"id":"2","naw":1},"interpolationType":"smooth"},{"time":30,"delta":{"x":0,"y":0.38,"z":0,"w":0.92}}],"shapeVisible":[{"time":3,"delta":false}],"shapeStretch":[{"time":0,"delta":{"x":1,"y":1,"z":1}},{"ti1,"y":0,"z":0}}]}}}
+@@
+{"Parent":"P","Model":"A.blockymodel","Texture":"T.rpng","GadientSetme":20,"delta":{"x":2,"y":1,"z":1}}],"shapeUvOffset":[{"time":0,"delta":{"x":1,"y":1}}],"position":[{"time":0,"delta":{"x":1,"y":2,"z":3},71}],"CustomModel":"A.blockymodel","CustomModelTexture":[{"Texture":"T.png"}],"CustomModelScale":2.0,"State":{"Definitions":{"On":{"DrawType":"Cube"}}}}}
+@@
+{"version":8,"blockIdOersion":11,"anchorX":4,"anchorY":10,"anchorZ":-4,"blocks":[{"x":0,"y":10,"z":2,"name":"Rock_Slate"},{"x":1,"y":10,"z":2,"name":"Blk","rotation":2,"support":15,"filler":1024,"component"jtime":-49,"delta":{"x":0,"y":0,"zs":{"Components":{"FarmingBlock":{}}}},{"x":2,"y":10,"z"~2,"name":0}},{"time":30,"delta":{"x":1,"y":0,"z":0}}]}}}
+@@
+{}
+@@
+{}
+@@
+{"BlockType":{"DrawType":"CubeWithModel","Textures":[{"All":"T.png","Sides":"T.png","Up":"G.png","Weight":1}]"

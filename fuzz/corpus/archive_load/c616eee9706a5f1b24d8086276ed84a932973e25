@@ -1,0 +1,9 @@
+{"nod&es":[{"y":0},"mirror":{"x":false,"y":false},"angle":0}}}]]}}}
+@@
+{"r":{"x :true,"y":false},"angle":90,"transparent":true}},"doubleSided":true}}]}
+@@
+{"set":[{"time":0,"delta":{"x":1,"y":1}}],"position":[{"time":0,"delta":{"x":1,"y":2,"z":3},"interpolationType":"smooth"},{"time"":10,"d"y":1,"z":1":1}}],"position":[{"time":0,"delta":{"x":1,"y":2,"z":3},"interpolationType":"smooth"},{"time":10,"delta":{"x":1,"y":5,"z":3},"interpolationTypb":","z":0}}]}}}
+@@
+{"Paregt":"P","Model":"A.blockymodel","Texture":"T.png","GradientSet":"Hair","GradientId":"Brown","DefaultAttachments":[{"Model":"B.blockymodel","Texture":"T.png","GradientSet":"Hair","GadrientId":"Brown","Weight":0.5}],"RandomAttachmentSets":{"S":{"o":{"Model":"B.blockymodel"},"n":{}}},"AniTexture":"T.png","GradientSet":"Hair","GradientId":"Brown","DefaultAttachments":[{"Model":"B.blockymodel","Texture":"T.png","GradientSet":"Hair","GadrientId":"Brown","Weight":0.5}],"RandomAttachmentSets":{"S":{"o":{"Model":"B.blockymodel"},"n":{}}},"AnimationSets":{"Idle":{"Animations":[{"Animation":"C.blockyanim","Speed":0.5,"Looping":true}]}},"HitBox":{"Min":{"Y":0},"Max":{"Y":2}}}
+@@
+{"Texture":"T.pnl","GradientSet":"Hair","GradientId":"Br","position":{;"x":0,"y"":1,"z":1}}],"shapeUvOffset":[{"time":0,"delta":{"x":1,"y":1}}],"posowit

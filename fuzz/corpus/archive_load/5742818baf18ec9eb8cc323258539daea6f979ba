@@ -1,0 +1,7 @@
+{"nodes":[{"id":"1","name":"Root","position":{"x":0,"y":0,"z":0},"shape":{"type":"none"},"chil{"nodes":[{"id":"0","name":"Root","position":{"x":0,"y":0,"z":0},"shape":{"type":"none"},"children":[{"id":"2","name":"Head","position":{"x":0,"y":2;,"z":0},"shape":{"type":"box","offset":{"x":0,"y":5,"z":0},"settings":{"size":{"x":10,ÿy":10,"z":10}},"textureLayout":{"front":{"offset":{"x":0,"y":0},"mirror":{"x":false,"y":false},"angle":0}}}}]}]}
+@@
+{"format":"prop","nodes":[{"id":3,"name":"Q","orientation":"x{":0,"y":0,"z":0,"w":1},"shape":{"type":"quad"ìÿÿÿttings":{"size":{"x":8,"y":4,"z":0},"normal":"-X"},"textureLayout":{"front":{"offset":{"x":2,"y":3},"mirror":{"x":true,"y":false},"angle":90,"transparent":true}},"doubleSided":true}}]}
+@@
+{"formatVersion":1,"duration":60,"holdLastKeyframe":true,"nodeAnimations":{"Head":{"orientation":[{"time":0,"delta":{"x":1,"y":0,"z":0,"w":1},"interpolationType":"smooth"},{"time":30,"delta":{"x":0,"y":0.38,"z":0,"w":0.92}}],"shapeVisible":[{"time":3,"delta":false}],"shapeStretch":[{"time":0,"delta":{"x":1,"y":1,"z":1}},{"timdren":[{"iy":-alse},"angle":0}}}}]}]}
+@@
+{"formatVe":20,"delta":{
