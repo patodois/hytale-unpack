@@ -44,7 +44,13 @@ fn split(data: &[u8]) -> Vec<&[u8]> {
 }
 
 fuzz_target!(|data: &[u8]| {
-    let dir = std::path::PathBuf::from(format!("/dev/shm/hytale-fuzz-{}", std::process::id()));
+    // RAM disk where there is one (Linux), the temp directory elsewhere (macOS)
+    let base = if std::path::Path::new("/dev/shm").is_dir() {
+        std::path::PathBuf::from("/dev/shm")
+    } else {
+        std::env::temp_dir()
+    };
+    let dir = base.join(format!("hytale-fuzz-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("a.zip");
     {

@@ -175,7 +175,7 @@ fn a_stored_entry_that_claims_a_huge_size_for_both_sizes_does_not_reserve_it() {
 fn a_stored_entry_reserves_no_more_than_it_stores() {
     let zip = Temp::new(&zip_claiming(
         "Common/D.blockymodel",
-        &vec![b'x'; 100],
+        &[b'x'; 100],
         zip::CompressionMethod::Stored,
         1 << 20,
         Some(1 << 20),

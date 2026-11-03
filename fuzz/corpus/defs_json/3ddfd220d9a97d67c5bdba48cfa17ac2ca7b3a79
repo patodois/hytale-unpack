@@ -1,1 +1,0 @@
-{"BlockType":{"DrawType":"CubeWithModel","Textures":[{"All":"T.png","Sides":"T.png","Up":"G.png","Weight":1}],"CustomModel":"A.blockymodel","CustomModelTexture":[{"Texture":"T.png"}],"CustomModelScale":2.0,"State":{"Definitions":{"On":{"DrawType":"Cube"}}}}}

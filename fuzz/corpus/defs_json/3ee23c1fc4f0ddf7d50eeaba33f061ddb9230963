@@ -1,1 +1,0 @@
-{"Parent":"P","Model":"A.blockymodel","Texture":"T.png","GradientSet":"Hair","GradientId":"Brown","DefaultAttachments":[{"Model":"B.blockymodel","Texture":"T.png","GradientSet":"Hair","GradientId":"Brown","Weight":0.5}],"RandomAttachmentSets":{"S":{"o":{"Model":"B.blockymodel"},"n":{}}},"AnimationSets":{"Idle":{"Animations":[{"{"				":{"Min":{"Y":0},"Max":{"Y":2}}}
