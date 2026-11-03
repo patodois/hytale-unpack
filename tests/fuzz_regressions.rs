@@ -188,3 +188,36 @@ fn a_stored_entry_reserves_no_more_than_it_stores() {
     // times that
     assert!(peak < 1 << 12, "reserved {peak} bytes for a stored entry");
 }
+
+use hytale_unpack::image::{decode_png, encode_png};
+
+/// Found by review: a valid 6000 x 6000 PNG (152 KB, 144 MB decoded) was refused by a cap of
+/// 128 MiB that nothing in the format justifies
+#[test]
+fn a_big_valid_png_decodes() {
+    let px = vec![7u8; 6000 * 6000 * 4];
+    let png = encode_png(6000, 6000, &px).unwrap();
+    let img = decode_png(&png).unwrap();
+    assert_eq!((img.width, img.height), (6000, 6000));
+    assert!(img.data == px);
+}
+
+/// A header can pass the ratio check (a file of this length *could* hold the image) and still
+/// lie. The output must then grow with the rows that exist, not be reserved from the header.
+#[test]
+fn a_png_cut_short_does_not_reserve_what_its_header_claims() {
+    let px = vec![7u8; 4096 * 4096 * 4];
+    let png = encode_png(4096, 4096, &px).unwrap();
+    // the image data starts after the signature (8), IHDR (25) and the chunk header (8); keep
+    // 2200 bytes of it: with those 41 the file is long enough for the ratio check (64 MiB /
+    // (1032 * 32) = 2033 bytes), and far shorter than the whole image
+    let cut = &png[..8 + 25 + 8 + 2200];
+    let mut result = None;
+    let largest = counting::largest_allocation(|| result = Some(decode_png(cut)));
+    assert!(result.unwrap().is_err());
+    let claimed = 4096 * 4096 * 4;
+    assert!(
+        largest < claimed / 4,
+        "allocated {largest} bytes at once for a header that claims {claimed}"
+    );
+}

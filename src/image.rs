@@ -29,10 +29,6 @@ impl Rgba {
     }
 }
 
-/// The most a decoded texture may take (RGBA, 8 bits): 128 MiB, a 5792 x 5792 image. The biggest
-/// textures of the game are far below it.
-const MAX_DECODED: usize = 128 << 20;
-
 /// How many bytes a PNG of `n` bytes can decode to at most, whatever its header says.
 ///
 /// The image data is zlib-compressed (PNG specification, section 10.3), i.e. DEFLATE, in which a
@@ -44,15 +40,40 @@ fn decodable_from(n: usize) -> usize {
     n.saturating_mul(1032 * 32)
 }
 
+/// Appends the texels of one decoded row (or of a whole frame) as RGBA
+fn push_rgba(color: png::ColorType, raw: &[u8], out: &mut Vec<u8>) -> Result<()> {
+    match color {
+        png::ColorType::Rgba => out.extend_from_slice(raw),
+        png::ColorType::Rgb => {
+            for p in raw.as_chunks::<3>().0 {
+                out.extend_from_slice(&[p[0], p[1], p[2], 255]);
+            }
+        }
+        png::ColorType::Grayscale => {
+            for &g in raw {
+                out.extend_from_slice(&[g, g, g, 255]);
+            }
+        }
+        png::ColorType::GrayscaleAlpha => {
+            for p in raw.as_chunks::<2>().0 {
+                out.extend_from_slice(&[p[0], p[0], p[0], p[1]]);
+            }
+        }
+        png::ColorType::Indexed => bail!("palette PNG was not expanded"),
+    }
+    Ok(())
+}
+
 pub fn decode_png(bytes: &[u8]) -> Result<Rgba> {
     let mut dec = png::Decoder::new(Cursor::new(bytes));
     dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = dec.read_info()?;
-    // The header alone says how big the output is; do not allocate it before it is believable
+    // The header alone says how big the output is: believe it only as far as a file of this
+    // length can decode
     let size = reader
         .output_buffer_size()
         .ok_or_else(|| anyhow::anyhow!("PNG too large"))?;
-    if size > MAX_DECODED || size > decodable_from(bytes.len()) {
+    if size > decodable_from(bytes.len()) {
         bail!(
             "PNG header declares {} x {} pixels, more than a {} byte file can hold",
             reader.info().width,
@@ -60,36 +81,26 @@ pub fn decode_png(bytes: &[u8]) -> Result<Rgba> {
             bytes.len()
         );
     }
-    let mut buf = vec![0; size];
-    let info = reader.next_frame(&mut buf)?;
-    buf.truncate(info.buffer_size());
-    let (w, h) = (info.width, info.height);
+    let (color, _) = reader.output_color_type();
+    let mut data = Vec::new();
+    let (w, h);
+    if reader.info().interlaced {
+        // The passes of an interlaced image fill the frame in turn, so the frame has to exist
+        // before its last pass is read
+        let mut buf = vec![0; size];
+        let info = reader.next_frame(&mut buf)?;
+        buf.truncate(info.buffer_size());
+        (w, h) = (info.width, info.height);
+        push_rgba(info.color_type, &buf, &mut data)?;
+    } else {
+        // Rows are appended as they are decoded, so a header that claims more than the data holds
+        // costs nothing beyond the rows that exist
+        (w, h) = (reader.info().width, reader.info().height);
+        while let Some(row) = reader.next_row()? {
+            push_rgba(color, row.data(), &mut data)?;
+        }
+    }
     let px = w as usize * h as usize;
-    let data = match info.color_type {
-        png::ColorType::Rgba => buf,
-        png::ColorType::Rgb => {
-            let mut out = Vec::with_capacity(px * 4);
-            for p in buf.as_chunks::<3>().0 {
-                out.extend_from_slice(&[p[0], p[1], p[2], 255]);
-            }
-            out
-        }
-        png::ColorType::Grayscale => {
-            let mut out = Vec::with_capacity(px * 4);
-            for &g in &buf {
-                out.extend_from_slice(&[g, g, g, 255]);
-            }
-            out
-        }
-        png::ColorType::GrayscaleAlpha => {
-            let mut out = Vec::with_capacity(px * 4);
-            for p in buf.as_chunks::<2>().0 {
-                out.extend_from_slice(&[p[0], p[0], p[0], p[1]]);
-            }
-            out
-        }
-        png::ColorType::Indexed => bail!("palette PNG was not expanded"),
-    };
     if data.len() != px * 4 {
         bail!("PNG decoded to {} bytes for {w}x{h}", data.len());
     }
@@ -245,8 +256,19 @@ mod tests {
     fn a_header_that_declares_more_than_the_file_can_hold_is_an_error() {
         let err = decode_png(&declaring(63234, 4_244_635_652)).unwrap_err();
         assert!(format!("{err:#}").contains("more than a"), "{err:#}");
-        // 16384 x 16384 RGBA is 1 GiB: past the cap, though a legal PNG header
+        // 16384 x 16384 RGBA is 1 GiB, a legal header, but not for a file of this length
         assert!(decode_png(&declaring(16384, 16384)).is_err());
+    }
+
+    /// 4096 x 4096 RGBA is 64 MiB, which a file of a few dozen bytes cannot expand to (it would
+    /// need about a million output bytes per input byte, DEFLATE and the RGBA expansion give at
+    /// most 1032 x 32): the header is refused by the ratio, before any decoding
+    #[test]
+    fn the_ratio_of_the_format_refuses_a_header_no_file_that_short_can_fill() {
+        let png = declaring(4096, 4096);
+        assert!(png.len() * 1032 * 32 < 4096 * 4096 * 4);
+        let err = decode_png(&png).unwrap_err();
+        assert!(format!("{err:#}").contains("more than a"), "{err:#}");
     }
 
     #[test]
@@ -256,6 +278,163 @@ mod tests {
         let png = encode_png(2048, 2048, &px).unwrap();
         assert!(png.len() < 100_000);
         assert_eq!(decode_png(&png).unwrap().data.len(), px.len());
+    }
+
+    /// Adler-32 of the zlib format (RFC 1950 section 8.2)
+    fn adler32(data: &[u8]) -> u32 {
+        let (mut a, mut b) = (1u32, 0u32);
+        for &x in data {
+            a = (a + x as u32) % 65521;
+            b = (b + a) % 65521;
+        }
+        (b << 16) | a
+    }
+
+    /// A zlib stream of stored blocks (RFC 1950, RFC 1951 section 3.2.4)
+    fn zlib_stored(data: &[u8]) -> Vec<u8> {
+        let mut out = vec![0x78, 0x01];
+        out.push(1); // final block, stored
+        out.extend_from_slice(&(data.len() as u16).to_le_bytes());
+        out.extend_from_slice(&(!(data.len() as u16)).to_le_bytes());
+        out.extend_from_slice(data);
+        out.extend_from_slice(&adler32(data).to_be_bytes());
+        out
+    }
+
+    /// DEFLATE bits, least significant bit first (RFC 1951 section 3.1.1)
+    #[derive(Default)]
+    struct Bits {
+        out: Vec<u8>,
+        acc: u8,
+        n: u32,
+    }
+
+    impl Bits {
+        fn bit(&mut self, b: u32) {
+            self.acc |= (b as u8 & 1) << self.n;
+            self.n += 1;
+            if self.n == 8 {
+                self.out.push(self.acc);
+                (self.acc, self.n) = (0, 0);
+            }
+        }
+        /// A value that is not a Huffman code: low bit first
+        fn value(&mut self, v: u32, count: u32) {
+            for i in 0..count {
+                self.bit(v >> i);
+            }
+        }
+        /// A Huffman code: most significant bit first
+        fn code(&mut self, v: u32, len: u32) {
+            for i in (0..len).rev() {
+                self.bit(v >> i);
+            }
+        }
+        fn finish(mut self) -> Vec<u8> {
+            if self.n > 0 {
+                self.out.push(self.acc);
+            }
+            self.out
+        }
+    }
+
+    /// A zlib stream of `1 + 258 * k` zero bytes at the best ratio DEFLATE has: one dynamic
+    /// Huffman block in which the literal 0 costs 2 bits, and each length-258 match at distance 1
+    /// costs one bit for the length code and one for the distance code (RFC 1951 section 3.2.5),
+    /// i.e. 1032 output bytes per input byte
+    fn zlib_best_ratio_zeros(k: usize) -> Vec<u8> {
+        let mut b = Bits::default();
+        b.value(1, 1); // last block
+        b.value(2, 2); // dynamic Huffman codes
+        b.value(286 - 257, 5); // HLIT: 286 literal/length codes
+        b.value(0, 5); // HDIST: 1 distance code
+        b.value(14, 4); // HCLEN: 18 code length codes
+                        // Lengths of the code length codes in the order 16 17 18 0 8 7 9 6 10 5 11 4 12 3 13 2 14
+                        // 1: symbol 18 has 1 bit, symbols 2 and 1 have 2 bits
+        for len in [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2] {
+            b.value(len, 3);
+        }
+        // Canonical codes: 18 = 0, 1 = 10, 2 = 11
+        // literal/length lengths: symbol 0 -> 2, 1..=255 -> 0, 256 -> 2, 257..=284 -> 0, 285 -> 1
+        b.code(0b11, 2);
+        b.code(0, 1);
+        b.value(138 - 11, 7); // 138 zeros
+        b.code(0, 1);
+        b.value(117 - 11, 7); // 117 zeros
+        b.code(0b11, 2);
+        b.code(0, 1);
+        b.value(28 - 11, 7); // 28 zeros
+        b.code(0b10, 2);
+        // distance lengths: symbol 0 -> 1
+        b.code(0b10, 2);
+        // Data. Literal/length codes: 285 = 0, 0 = 10, 256 = 11; distance code 0 = 0
+        b.code(0b10, 2); // the first zero byte
+        for _ in 0..k {
+            b.code(0, 1); // length 258
+            b.code(0, 1); // distance 1
+        }
+        b.code(0b11, 2); // end of block
+        let mut out = vec![0x78, 0xda];
+        out.extend(b.finish());
+        out.extend_from_slice(&adler32(&vec![0; 1 + 258 * k]).to_be_bytes());
+        out
+    }
+
+    /// A 1-bit palette image with a `tRNS` chunk expands to 32 output bytes per input pixel byte
+    /// (one bit becomes four bytes), and the best DEFLATE stream gives 1032 pixel bytes per input
+    /// byte: the widest expansion `decodable_from` allows for. It must pass, and the file must be
+    /// so short that a factor of 28 would already refuse it (the file has fixed chunks that
+    /// keep it from reaching 32 exactly).
+    #[test]
+    fn a_one_bit_palette_image_at_the_widest_expansion_decodes() {
+        // 2064 pixels are 258 bytes, a row is 259 bytes with its filter byte; 5161 rows are
+        // 5161 * 259 = 1 + 258 * 5181 bytes
+        let (w, h, k) = (2064u32, 5161u32, 5181usize);
+        let mut ihdr = w.to_be_bytes().to_vec();
+        ihdr.extend_from_slice(&h.to_be_bytes());
+        ihdr.extend_from_slice(&[1, 3, 0, 0, 0]); // 1-bit palette
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        png.extend(chunk(b"IHDR", &ihdr));
+        png.extend(chunk(b"PLTE", &[0, 0, 0, 255, 255, 255]));
+        png.extend(chunk(b"tRNS", &[0, 255]));
+        png.extend(chunk(b"IDAT", &zlib_best_ratio_zeros(k)));
+        png.extend(chunk(b"IEND", &[]));
+        let decoded = w as usize * h as usize * 4;
+        assert!(
+            png.len() * 1032 * 28 < decoded,
+            "{} bytes is too long to need the factor of 32",
+            png.len()
+        );
+        let img = decode_png(&png).unwrap();
+        assert_eq!((img.width, img.height), (w, h));
+        assert_eq!(img.data.len(), decoded);
+        assert!(img.data.chunks(4).all(|p| p == [0, 0, 0, 0]));
+    }
+
+    /// An interlaced image is decoded pass by pass into a frame (Adam7, PNG specification
+    /// section 8.2): a 3 x 3 grey image whose texels are 1 to 9 in reading order
+    #[test]
+    fn an_interlaced_image_is_put_back_in_reading_order() {
+        // pass 1: (0,0); pass 4: (2,0); pass 5: (0,2) (2,2); pass 6: (1,0), (1,2) as two rows;
+        // pass 7: row 1; passes 2 and 3 are empty. Each row starts with filter type 0.
+        let raw = [
+            0, 1, // pass 1
+            0, 3, // pass 4
+            0, 7, 9, // pass 5
+            0, 2, 0, 8, // pass 6
+            0, 4, 5, 6, // pass 7
+        ];
+        let mut ihdr = 3u32.to_be_bytes().to_vec();
+        ihdr.extend_from_slice(&3u32.to_be_bytes());
+        ihdr.extend_from_slice(&[8, 0, 0, 0, 1]); // 8-bit grey, interlace method 1
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        png.extend(chunk(b"IHDR", &ihdr));
+        png.extend(chunk(b"IDAT", &zlib_stored(&raw)));
+        png.extend(chunk(b"IEND", &[]));
+        let img = decode_png(&png).unwrap();
+        let grey: Vec<u8> = img.data.chunks(4).map(|p| p[0]).collect();
+        assert_eq!(grey, (1..=9).collect::<Vec<u8>>());
+        assert!(img.data.chunks(4).all(|p| p[3] == 255));
     }
 
     #[test]
