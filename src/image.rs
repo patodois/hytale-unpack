@@ -64,6 +64,15 @@ fn push_rgba(color: png::ColorType, raw: &[u8], out: &mut Vec<u8>) -> Result<()>
     Ok(())
 }
 
+/// `size` zero bytes, or an error when they cannot be had (a failed allocation would abort)
+fn zeroed(size: usize) -> Result<Vec<u8>> {
+    let mut buf = Vec::new();
+    buf.try_reserve_exact(size)
+        .map_err(|_| anyhow::anyhow!("PNG too large: {size} bytes of output"))?;
+    buf.resize(size, 0);
+    Ok(buf)
+}
+
 pub fn decode_png(bytes: &[u8]) -> Result<Rgba> {
     let mut dec = png::Decoder::new(Cursor::new(bytes));
     dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
@@ -87,14 +96,15 @@ pub fn decode_png(bytes: &[u8]) -> Result<Rgba> {
     if reader.info().interlaced {
         // The passes of an interlaced image fill the frame in turn, so the frame has to exist
         // before its last pass is read
-        let mut buf = vec![0; size];
+        let mut buf = zeroed(size)?;
         let info = reader.next_frame(&mut buf)?;
         buf.truncate(info.buffer_size());
         (w, h) = (info.width, info.height);
         push_rgba(info.color_type, &buf, &mut data)?;
     } else {
-        // Rows are appended as they are decoded, so a header that claims more than the data holds
-        // costs nothing beyond the rows that exist
+        // Rows are appended as they are decoded, so the output costs nothing beyond the rows that
+        // exist. The `png` crate itself holds a row of the header's width (zero-filled, a few
+        // times the row's bytes), which the ratio check above bounds like the whole frame.
         (w, h) = (reader.info().width, reader.info().height);
         while let Some(row) = reader.next_row()? {
             push_rgba(color, row.data(), &mut data)?;
@@ -258,6 +268,97 @@ mod tests {
         assert!(format!("{err:#}").contains("more than a"), "{err:#}");
         // 16384 x 16384 RGBA is 1 GiB, a legal header, but not for a file of this length
         assert!(decode_png(&declaring(16384, 16384)).is_err());
+    }
+
+    /// The bound is the ratio and nothing else: a header one byte over `decodable_from(len)` is
+    /// refused, one exactly at it is believed (and fails later, on its data)
+    #[test]
+    fn the_ratio_is_refused_just_above_and_believed_at_the_bound() {
+        let len = declaring(1, 1).len();
+        // one row of `w` RGBA pixels: 4 * w bytes
+        let at = 33024 * len / 4;
+        assert_eq!(at * 4, 33024 * len);
+        let above = decode_png(&declaring(at as u32 + 1, 1)).unwrap_err();
+        assert!(format!("{above:#}").contains("more than a"), "{above:#}");
+        let on = decode_png(&declaring(at as u32, 1)).unwrap_err();
+        assert!(!format!("{on:#}").contains("more than a"), "{on:#}");
+    }
+
+    #[test]
+    fn a_frame_that_cannot_be_allocated_is_an_error_not_an_abort() {
+        assert!(zeroed(usize::MAX / 2).is_err());
+        assert_eq!(zeroed(3).unwrap(), [0, 0, 0]);
+    }
+
+    /// A non-interlaced image of `color` and `depth`, `raw` being its rows, through the
+    /// encoder of the `png` crate
+    fn encoded(
+        color: png::ColorType,
+        depth: png::BitDepth,
+        w: u32,
+        h: u32,
+        raw: &[u8],
+        palette: Option<Vec<u8>>,
+    ) -> Vec<u8> {
+        let mut out = Vec::new();
+        {
+            let mut enc = png::Encoder::new(&mut out, w, h);
+            enc.set_color(color);
+            enc.set_depth(depth);
+            if let Some(p) = palette {
+                enc.set_palette(p);
+            }
+            let mut writer = enc.write_header().unwrap();
+            writer.write_image_data(raw).unwrap();
+        }
+        out
+    }
+
+    #[test]
+    fn rgb_grey_grey_alpha_and_palette_images_become_rgba() {
+        use png::{BitDepth::*, ColorType::*};
+        // RGB: alpha is opaque
+        let png = encoded(
+            Rgb,
+            Eight,
+            2,
+            2,
+            &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+            None,
+        );
+        let img = decode_png(&png).unwrap();
+        assert_eq!(
+            img.data,
+            [1, 2, 3, 255, 4, 5, 6, 255, 7, 8, 9, 255, 10, 11, 12, 255]
+        );
+        // Grey: the grey is repeated, alpha is opaque
+        let png = encoded(Grayscale, Eight, 2, 2, &[10, 20, 30, 40], None);
+        assert_eq!(
+            decode_png(&png).unwrap().data,
+            [10, 10, 10, 255, 20, 20, 20, 255, 30, 30, 30, 255, 40, 40, 40, 255]
+        );
+        // Grey and alpha: the alpha is the file's
+        let png = encoded(GrayscaleAlpha, Eight, 2, 1, &[10, 100, 20, 200], None);
+        assert_eq!(
+            decode_png(&png).unwrap().data,
+            [10, 10, 10, 100, 20, 20, 20, 200]
+        );
+        // 16 bits keep the high byte
+        let png = encoded(Grayscale, Sixteen, 2, 1, &[0xab, 0xcd, 0x12, 0x34], None);
+        assert_eq!(
+            decode_png(&png).unwrap().data,
+            [0xab, 0xab, 0xab, 255, 0x12, 0x12, 0x12, 255]
+        );
+        // A palette without transparency is RGB, with a 1-bit index
+        let png = encoded(
+            Indexed,
+            One,
+            2,
+            1,
+            &[0b0100_0000],
+            Some(vec![9, 8, 7, 1, 2, 3]),
+        );
+        assert_eq!(decode_png(&png).unwrap().data, [9, 8, 7, 255, 1, 2, 3, 255]);
     }
 
     /// 4096 x 4096 RGBA is 64 MiB, which a file of a few dozen bytes cannot expand to (it would

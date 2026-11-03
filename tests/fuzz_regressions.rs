@@ -80,13 +80,15 @@ impl Drop for Temp {
 
 /// A zip of one entry of `content`, compressed with `method`, whose central directory and local
 /// header both claim `claimed` bytes for the content and `claimed_compressed` (if given) for the
-/// stored bytes
+/// stored bytes. `pad` bytes of a second, stored entry follow the first one, so that the file
+/// is longer than the entry (the length of the file is a bound the reader uses).
 fn zip_claiming(
     name: &str,
     content: &[u8],
     method: zip::CompressionMethod,
     claimed: u32,
     claimed_compressed: Option<u32>,
+    pad: usize,
 ) -> Vec<u8> {
     let mut buf = Vec::new();
     {
@@ -94,6 +96,12 @@ fn zip_claiming(
         let opts = zip::write::SimpleFileOptions::default().compression_method(method);
         zip.start_file(name, opts).unwrap();
         zip.write_all(content).unwrap();
+        if pad > 0 {
+            let stored = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            zip.start_file("Common/Pad.bin", stored).unwrap();
+            zip.write_all(&vec![0u8; pad]).unwrap();
+        }
         zip.finish().unwrap();
     }
     let find = |sig: &[u8; 4]| buf.windows(4).position(|w| w == sig).unwrap();
@@ -110,7 +118,9 @@ fn zip_claiming(
 }
 
 /// Found by fuzzing (`fuzz/crashes/assets_zip/big-claim`): a 170-byte archive whose entry claims
-/// 250 MiB made `Assets::read` reserve 250 MiB before reading a byte.
+/// 250 MiB made `Assets::read` reserve 250 MiB before reading a byte. Found by review: the
+/// entry's own compressed size bounds it too, in a file that is longer than the entry (here a
+/// 1 MiB stored entry follows), where the length of the file alone would allow it.
 #[test]
 fn an_entry_that_claims_a_huge_size_does_not_reserve_it() {
     let zip = Temp::new(&zip_claiming(
@@ -119,16 +129,85 @@ fn an_entry_that_claims_a_huge_size_does_not_reserve_it() {
         zip::CompressionMethod::Deflated,
         250 << 20,
         None,
+        1 << 20,
     ));
     let assets = Assets::open(&zip.0).unwrap();
-    let bytes = assets.read("Common/A.blockymodel").unwrap();
+    let mut bytes = Vec::new();
+    let largest = counting::largest_allocation(|| {
+        bytes = assets.read("Common/A.blockymodel").unwrap();
+    });
     assert!(bytes.len() <= 8);
     assert!(
-        bytes.capacity() < 1 << 20,
-        "reserved {} bytes for a {} byte entry",
-        bytes.capacity(),
+        largest < 1 << 20,
+        "allocated {largest} bytes at once for a {} byte entry",
         bytes.len()
     );
+}
+
+/// Bytes that DEFLATE cannot shrink: a linear congruential sequence
+fn incompressible(n: usize) -> Vec<u8> {
+    let mut x = 12345u32;
+    (0..n)
+        .map(|_| {
+            x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (x >> 24) as u8
+        })
+        .collect()
+}
+
+/// A DEFLATE stream expands by 1032 at most: an entry whose stored bytes are `c` long reserves
+/// `c * 1032` however much it claims, and not a byte more
+#[test]
+fn a_deflate_entry_reserves_at_most_1032_times_what_it_stores() {
+    let zip_bytes = zip_claiming(
+        "Common/E.blockymodel",
+        &incompressible(4100),
+        zip::CompressionMethod::Deflated,
+        250 << 20,
+        None,
+        0,
+    );
+    let central = zip_bytes
+        .windows(4)
+        .position(|w| w == b"PK\x01\x02")
+        .unwrap();
+    let compressed =
+        u32::from_le_bytes(zip_bytes[central + 20..central + 24].try_into().unwrap()) as usize;
+    let zip = Temp::new(&zip_bytes);
+    let assets = Assets::open(&zip.0).unwrap();
+    let largest = counting::largest_allocation(|| {
+        let _ = assets.read("Common/E.blockymodel");
+    });
+    assert_eq!(largest, compressed * 1032);
+}
+
+/// The stored bytes of an entry are the ones after the start of its data, not the whole file:
+/// the header before it does not count
+#[test]
+fn the_bytes_before_the_data_do_not_count_as_stored() {
+    let content = vec![b'z'; 200 << 10];
+    let zip_bytes = zip_claiming(
+        "Common/F.blockymodel",
+        &content,
+        zip::CompressionMethod::Stored,
+        (300 << 10) as u32,
+        Some((300 << 10) as u32),
+        0,
+    );
+    let local = zip_bytes
+        .windows(4)
+        .position(|w| w == b"PK\x03\x04")
+        .unwrap();
+    let name_len = u16::from_le_bytes([zip_bytes[local + 26], zip_bytes[local + 27]]) as usize;
+    let extra_len = u16::from_le_bytes([zip_bytes[local + 28], zip_bytes[local + 29]]) as usize;
+    let data_start = local + 30 + name_len + extra_len;
+    let file_len = zip_bytes.len();
+    let zip = Temp::new(&zip_bytes);
+    let assets = Assets::open(&zip.0).unwrap();
+    let largest = counting::largest_allocation(|| {
+        let _ = assets.read("Common/F.blockymodel");
+    });
+    assert_eq!(largest, file_len - data_start);
 }
 
 #[test]
@@ -140,6 +219,7 @@ fn a_true_size_is_still_reserved_in_one_go() {
         zip::CompressionMethod::Deflated,
         5000,
         None,
+        0,
     ));
     let assets = Assets::open(&zip.0).unwrap();
     let bytes = assets.read("Common/B.blockymodel").unwrap();
@@ -159,6 +239,7 @@ fn a_stored_entry_that_claims_a_huge_size_for_both_sizes_does_not_reserve_it() {
         zip::CompressionMethod::Stored,
         250 << 20,
         Some(250 << 20),
+        0,
     ));
     let assets = Assets::open(&zip.0).unwrap();
     // the read fails (the checksum does not match the claimed content), what matters is the
@@ -179,6 +260,7 @@ fn a_stored_entry_reserves_no_more_than_it_stores() {
         zip::CompressionMethod::Stored,
         1 << 20,
         Some(1 << 20),
+        0,
     ));
     let assets = Assets::open(&zip.0).unwrap();
     let peak = counting::largest_allocation(|| {
