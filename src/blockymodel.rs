@@ -669,6 +669,36 @@ mod tests {
         assert!(faces[0].positions.iter().all(|p| p[0] == 0.0));
     }
 
+    /// The `Y` arm of the axis match: the quad lies flat, its x extent along x and its y extent
+    /// along z
+    #[test]
+    fn a_quad_with_a_y_normal_lies_flat() {
+        let mut shape = Shape {
+            kind: ShapeType::Quad,
+            settings: Settings {
+                size: Some(V3 {
+                    x: 12.0,
+                    y: 7.0,
+                    z: 0.0,
+                }),
+                normal: Some("+Y".into()),
+                ..Settings::default()
+            },
+            ..Shape::default()
+        };
+        shape
+            .texture_layout
+            .insert("front".into(), FaceLayout::default());
+        let faces = shape_faces(&shape);
+        assert_eq!(faces.len(), 1);
+        assert_eq!(faces[0].side, "top");
+        let xs: Vec<f32> = faces[0].positions.iter().map(|p| p[0]).collect();
+        let zs: Vec<f32> = faces[0].positions.iter().map(|p| p[2]).collect();
+        assert!(xs.contains(&6.0) && xs.contains(&-6.0));
+        assert!(zs.contains(&3.5) && zs.contains(&-3.5));
+        assert!(faces[0].positions.iter().all(|p| p[1] == 0.0));
+    }
+
     /// Found by fuzzing: slicing the last byte of a `normal` that ends in a multi-byte character
     /// (`"é"`) panicked ("byte index 1 is not a char boundary")
     #[test]
