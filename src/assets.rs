@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use anyhow::{anyhow, bail, Context, Result};
-use zip::ZipArchive;
+use zip::{CompressionMethod, ZipArchive};
 
 /// Where the launcher puts the game on macOS, relative to the home directory.
 const MAC_INSTALL: &str =
@@ -40,6 +40,8 @@ const READ_LIMIT: u64 = 256 << 20;
 pub struct Assets {
     path: PathBuf,
     zip: Mutex<ZipArchive<File>>,
+    /// Length of the archive file: no entry can store more bytes than the file holds
+    file_len: u64,
     names: Vec<String>,
     sizes: Vec<u64>,
     index: HashMap<String, usize>,
@@ -67,6 +69,7 @@ impl Assets {
                 path.display()
             )
         })?;
+        let file_len = file.metadata()?.len();
         let mut zip = ZipArchive::new(file)
             .with_context(|| format!("reading the central directory of {}", path.display()))?;
         let n = zip.len();
@@ -87,6 +90,7 @@ impl Assets {
         Ok(Assets {
             path: path.to_path_buf(),
             zip: Mutex::new(zip),
+            file_len,
             names,
             sizes,
             index,
@@ -148,10 +152,17 @@ impl Assets {
         }
         let mut zip = self.zip.lock().unwrap();
         let mut f = zip.by_index(i).with_context(|| format!("opening {name}"))?;
-        // The size in the central directory is only a claim: reserve what the stored bytes can
-        // justify (a DEFLATE stream expands by at most 1032 times, see `image::decodable_from`),
-        // and let the vector grow if the entry really is that big
-        let reserve = self.sizes[i].min(f.compressed_size().saturating_mul(1032));
+        // The sizes in the headers are only claims. The stored bytes of an entry cannot be more
+        // than the file holds after the start of its data, and a DEFLATE stream expands by at
+        // most 1032 times (see `image::decodable_from`), a stored one not at all: reserve no more
+        // than that, and let the vector grow if the entry really is that big
+        let stored = self.file_len.saturating_sub(f.data_start().unwrap_or(0));
+        let ratio = if f.compression() == CompressionMethod::Stored {
+            1
+        } else {
+            1032
+        };
+        let reserve = self.sizes[i].min(f.compressed_size().min(stored).saturating_mul(ratio));
         let mut buf = Vec::with_capacity(reserve as usize);
         f.read_to_end(&mut buf)
             .with_context(|| format!("reading {name}"))?;
