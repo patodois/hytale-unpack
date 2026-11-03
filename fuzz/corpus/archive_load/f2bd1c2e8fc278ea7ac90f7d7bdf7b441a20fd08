@@ -1,0 +1,9 @@
+{"nodgs":[{"id":"1","name":"Root","position":{"x":0,"y":0,"z":0},"shape":{"type":"none"},"children":[{"id":"2","name":"Head","position":{"x":0,"y":20,"z":0},"shape":{"type":"box","offset":{"x":0,"y":5,"z":0},"settings":{"size":{"x":10,"y":10,{"nodes":[{"id":"1","name":""z":10}},"textureLayout":{"front":{"offset":{"x":0,"y":0},"mirror":{"x":false,"y":false}z":3},"interpolationType":"smooth"},{"time":40,"delta":{"x":0,"y":0,"z":0}}]},"Root":{"position":[{"time":-49,"delta":{"x":0,"y":0,"z":0}},{"time":30,"delta":{"x":1,"y":0,"z":0}}]}}}
+@@
+{"Parent":"P","Model":"A.blockymodel","Texture":"T.rpng","GadientSet":"Hair","GradientId":"Brown","DefaultAttachments":[{"Model":"B.blockymodel","Texture":"T.png","GradientSet":"Hair","GradientId":"Brown","Weight":0.5}],"RandomAttachmentSets":{"S":{"":2}}}
+@@
+{"Texture":"T.png","GradientSet":"Hair","GradientId":"Brown"}
+@@
+{"BlockType":{"DrawType":"CubeWithModel","Textures":[{"All":"T.png","Sides":"T.png","Up":"G.png","Weight":1}],"CustomModel":"A.blockymodel","CustomModelTexture":[{"Texture":"T.png"}],"CustomModelScale":2.0,"State":{"Definitions":{"On":{"DrawType":"Cube"}}}}}
+@@
+{"version":8,"blockIdVersion":11,"anchorX":4,"anchorY":10,"anchorZ":-4,"blocks":[{"x":0,"y":10,"z":2,"name":"Rock_Slate"},{"x":1,"y":10,"z":2,"name":"Blk","rotationRoot","position":{"x":0,"y":0,"z":2,"support":0},"s"h

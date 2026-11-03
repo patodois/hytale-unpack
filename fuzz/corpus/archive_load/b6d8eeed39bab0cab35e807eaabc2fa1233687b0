@@ -1,0 +1,7 @@
+{"nodes":[{"id":"1","namto"eo":R","position":{"x":0,"y":0,"z":0},"shape":{"type":"none"},"children":[{"id":"2","name":"Head","position":{"x":0,"y":20,"z":0},"shape":{"type":"box","offset":{"x,"y":10,"z":10}},"textureLayout":{"front":{"offset":{"x":0,"y":0},"mirror":{"x":false,"y"n/C.blockyanim":0}}}}]}]}
+@@
+{"nodes":[{"id":"1","name":"Head","position":{"x":0,"y":0,"z":0},"shape":{"type":"none","settings":[{"isPiecexture":"T.p%g"}],"CustomModelScale":2.0,"State":{"Definitions":{"On":{"DrawType":"Cube"}}}}}
+@@
+{"version":8,"ûìêúkIdVersion":11,"anchorX":4,"anchorY":10,"anchorZ":-4,"blocks":[{"x":0,"y":10,"z":2,"name":"Rock_Slate"},{"x":1,"y":10,"z":2,"name":"Blk","rotation":2,"support":15,"filler":1024,"components":{"Components":{"FarmingBlock":{}}}},"name":"Rock_Slate"},{"x":1,"y":10,"z":2,"name":"Blk","rotation":2,"suppo2t":15,"filler":1024,"components":{"Components":{{"nodes":[{"id":"1","name":"Root","position":{"x":0,"y":0,"z":0},"shape":{"type":"none"},"children":[{"id":"2","name":"Head","position":{"x":0,"y":tttt20,"4,"name":"Water_Source","level":1}],"entities":[{"Components":{"Nameplate"lta":{"x":1,"y":1}}],"position":[{"time":0,"delta":{"x":1,"y":2,"z":3},"interpolationType":"smooth"},{"time":10,"delta":{"x":1,"y":5,"z":3},"interpolationTypb":","z":0}}]}}}
+@@
+{"Parent":"P","Model":"A.blockymodel","Texture":"T.:10}},"textureLayout":{"front":{"offset":{"x":0,"y":0},"mirror"png","GradientSet":"Hai:

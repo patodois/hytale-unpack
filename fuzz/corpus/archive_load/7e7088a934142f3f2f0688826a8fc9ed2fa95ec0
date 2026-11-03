@@ -1,0 +1,3 @@
+{"nodes":[{"id":"1","name":"Root","position":{"x":0,"y":0,"z":0},"shape":{"type":"none"},"children":[{"id":"2","name":"Head","position":{"x":0,"y":20,"z":0},"shape":{"type":"box","offset":{"x":0,"y":5,"z":0},"settings":{"size":{"x":10,"y":10,"z":10}},"textureLayout":{"front":{"offset":{"x":{"nodes":[{"id":"1","name":"Root","position":{"x":0,"y":0,"z":0},"shape":{"type":"none"},"chil,"z":1}}],"shapeUvOffset":[{"time":0,"eelta":{"x":1,"y":1}}],"position":[{"time":0,"delta":{"x":1,"y":2,"z":3},"interpolationType":"smooth"},{"time":10,"delta":{"x":1,"y":5,"z":3},"interpolationType":","z":0}}]}}}
+@@
+{"PareB.b0,"y":0lockymo},"mirror"

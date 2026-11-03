@@ -1,0 +1,1 @@
+{"Weight":"P","Model":"A.blockymodel","Texture":"T.png","Gnts":[{"Moded":"B.blockymodel","Texture":"T.png","GradientSet":"Hair","GradientId":"Brown","Weihtg":0.5}],"RandomAtvachmentSets":{"S":{"o":{"Model":"B.blockymodel"},"n":{}}},"AnimationSets":{"Idle":{"Animations":[{"Animation":"C.blockyanim","Speed":0.5,"Looping":true}]}},"HitBox":{"Min":{"Y":2},"Max":{"Y":2}}}

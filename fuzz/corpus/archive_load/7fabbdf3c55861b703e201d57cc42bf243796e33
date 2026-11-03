@@ -1,0 +1,7 @@
+{"nodes":[{"id":"1","name":"Root","position":{"x":0,"y":0,"z":0},"shape":[{"Texture":"T.png"}],"CustomModelScale":2.0,"State":{"Definitions":{"On":{"DrawType":"Cube"}}}}}
+@@
+{"version":8,"blockIdVersion":11,"anchorX":4,"anchorY":10,"anchorZ":-4,"blocks":[{"x":0,"y":10,"z":2,"name":"Rock_Slate"},{"x":1,"y":10,"z":2,"name":"Blk","rotation":2,"support":15,"filler":1024,"components":{"Components":{tion":{"x":0,"y":6,"z":0},"shape":{"type":"box","settings":{"size":{"x":12,"y":4,"z":12,},"textureLayout":{"fro":"2","name":"Head","position":{"x":0,"y":20,"z":0},"shape":{"type":"box","offset":{"x":0,"y":5,"z":0},"settings":{"size":{"x":10,"y":10,"z":10}},"textureLayout":{"front":{"offset":{"x":0,"y":0},"mirror":{"x":false,"y":false},"angle":0}}}}]}]}
+@@
+{"nodes":[{"id":"1","name":"Head","position":{"x":0,"y":0,"z":0},"shape":{"type":"none","settings":{"isPiece":true}},"children":[{"id":"2","name":"Hat","position":{"x":0,"y":6,"z":0},"shape":{"type":"box","settings":{"size":{"x":12,"y":4,"z":12,},"textureLayout":{"front":{"offset":{"x":0,"y":0},"mirror":{"x":false,"y":false},"angle":0}}}}]}]}
+@@
+{"formatVersion":1,"duratioƒn":60,"holdLastKeyframe":true,"nodeAnimations":{"Head":{"orientation":[{"time"es":[{"id":"0","name":"Head","position":{"x":0,"y":0,"z":0},"shape":{"type":"none","settings":{"isPiece":true}},":0,"dnt":{"offset":{"x":0,"y":0},"mielta":{"x":0,rror":{"x":f

@@ -1,0 +1,7 @@
+{"nodes":[{"id":false,"y":false},"angle":0}}}}]}]}
+@@
+{"r":{"x :true,"y":false},"angle":90,"transparent":true}},"doubleSided":true}}]}
+@@
+{"set":[{"time":0,"delta":{"x":1,"y":1}}],"position":[{"time":0,"delta":{"x":1,"y":2,"z":3},"interpolationType":"smooth"},{"time":10,"d"y":1,"z":1}},{"time":20,"delta":{"x":2,"y":1,"z":1}}],"shapeUvOffset":[{"ztime":0,"delta":{"x":1,"y":1}}],"position":[{"time":0,"delta":{"x":1,"y":2,"z":3},"interpolationType":"smooth"},{"time":10,"delta":{"x":1,"y":5,"z":3},"interpolationTypb":","z":0}}]}}}
+@@
+{"Parent":"P","Model":"A.blockymodel","Texture":"T.png","GradientSet":"Hair","GradientId":"Brown","DefaultAttachments":[{"Model":"

@@ -1,0 +1,1 @@
+{"version":8,"blockIdVe":[{"x":0,"y":10,"z":2,"name":"Rock_Slate"},{"x":1,"y":10,"z":2,"name":"Blk","rotatifeller":1024,"components":{"Components":{"FarmingBlock":{}}}},{"x":2,"y":10,"z":2,"name":"Blk","rotation":9}],"fluids":[{"x":1,"y":1,"z"ер4,"name":"Water_Source","level":1}],"entities":[{"Components":{"Nameplate":{"Text":"Klops"}}}],"unknown":[1,2,3]}
