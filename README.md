@@ -18,6 +18,8 @@ This project contains no game code or game data, and it is not affiliated with, 
 sponsored by Hypixel Studios. Hytale is a trademark of its owners. It only reads files from a copy of
 the game you already have installed. See [Legal](#legal).
 
+**Adding this to a game.** Read the [guide to adding a game](https://github.com/patodois/rewrite-bridge/blob/main/docs/INTEGRATING.md) first. Here: the provider is `hytale_unpack::bridge::Hytale::open(assets_zip)` (the `bridge` feature is on by default), or `open_default()`, which reads `$HYTALE_ASSETS` and otherwise only knows the macOS launcher path.
+
 The rule of this crate is **nothing invented, 1:1 with the game data**: whatever cannot be determined
 from the data or from the official Blockbench plugin is left out, and listed under
 [What is left out](#what-is-left-out).
