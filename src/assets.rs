@@ -168,9 +168,7 @@ impl Assets {
         };
         let reserve = self.sizes[i].min(f.compressed_size().min(stored).saturating_mul(ratio));
         let mut buf = Vec::with_capacity(reserve as usize);
-        f.take(limit + 1)
-            .read_to_end(&mut buf)
-            .with_context(|| format!("reading {name}"))?;
+        read_bounded(f, limit, &mut buf).with_context(|| format!("reading {name}"))?;
         if buf.len() as u64 > limit {
             bail!("{name}: entry expands beyond {limit} bytes");
         }
@@ -224,5 +222,21 @@ mod read_limit_regression {
         assert!(a.read_limited("Common/test", 1024).is_err());
         drop(a);
         std::fs::remove_file(path).unwrap();
+    }
+}
+
+fn read_bounded(mut reader: impl Read, limit: u64, buf: &mut Vec<u8>) -> std::io::Result<usize> {
+    reader.by_ref().take(limit + 1).read_to_end(buf)
+}
+#[cfg(test)]
+mod bounded_read_consumption {
+    use super::*;
+    #[test]
+    fn read_limit_stops_consumption_before_the_post_read_check() {
+        let mut source = std::io::Cursor::new([42; 8192]);
+        let mut out = Vec::new();
+        read_bounded(&mut source, 1024, &mut out).unwrap();
+        assert_eq!(source.position(), 1025);
+        assert_eq!(out.len(), 1025);
     }
 }
