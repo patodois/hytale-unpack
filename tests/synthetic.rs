@@ -343,3 +343,24 @@ fn keys_before_zero_cost_a_channel_at_most_never_the_clip() {
     assert_eq!(am.animations[0].channels.len(), 2);
     assert!(am.animations[0].channels.iter().all(|c| c.times[0] == 0.0));
 }
+
+#[test]
+fn referenced_clip_read_and_parse_failures_are_reported() {
+    for content in [None, Some(b"{".to_vec())] {
+        let mut files = base_files();
+        model(
+            &mut files,
+            "BrokenClip",
+            r#"{"Model":"Body.blockymodel","Texture":"Body.png","AnimationSets":{"Idle":{"Animations":[{"Animation":"Broken.blockyanim"}]}}}"#,
+        );
+        if let Some(b) = content {
+            files.push(("Common/Broken.blockyanim".into(), b));
+        }
+        let fake = archive(&files);
+        let (am, report) = fake.hy.load_animated_report(&path("BrokenClip")).unwrap();
+        assert!(am.animations.is_empty());
+        assert_eq!(report.skipped_clips.len(), 1);
+        assert_eq!(report.skipped_clips[0].0, "Idle");
+        assert!(report.skipped_clips[0].1.contains("Broken.blockyanim"));
+    }
+}

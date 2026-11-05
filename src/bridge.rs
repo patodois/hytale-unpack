@@ -675,7 +675,12 @@ impl Hytale {
                     cache.insert(zip_path.to_string(), a.clone());
                     a
                 }
-                Err(_) => return,
+                Err(e) => {
+                    report
+                        .skipped_clips
+                        .push((name, format!("{zip_path}: {e:#}")));
+                    return;
+                }
             },
         };
         push_clip(rig, am, report, &anim, name);
