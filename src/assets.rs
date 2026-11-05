@@ -144,14 +144,18 @@ impl Assets {
 
     /// The bytes of one entry.
     pub fn read(&self, name: &str) -> Result<Vec<u8>> {
+        self.read_limited(name, READ_LIMIT)
+    }
+
+    fn read_limited(&self, name: &str, limit: u64) -> Result<Vec<u8>> {
         let i = self
             .lookup(name)
             .ok_or_else(|| anyhow!("{name}: not in Assets.zip"))?;
-        if self.sizes[i] > READ_LIMIT {
+        if self.sizes[i] > limit {
             bail!("{name}: {} bytes is too big to read at once", self.sizes[i]);
         }
         let mut zip = self.zip.lock().unwrap();
-        let mut f = zip.by_index(i).with_context(|| format!("opening {name}"))?;
+        let f = zip.by_index(i).with_context(|| format!("opening {name}"))?;
         // The sizes in the headers are only claims. The stored bytes of an entry cannot be more
         // than the file holds after the start of its data, and a DEFLATE stream expands by at
         // most 1032 times (see `image::decodable_from`), a stored one not at all: reserve no more
@@ -164,8 +168,12 @@ impl Assets {
         };
         let reserve = self.sizes[i].min(f.compressed_size().min(stored).saturating_mul(ratio));
         let mut buf = Vec::with_capacity(reserve as usize);
-        f.read_to_end(&mut buf)
+        f.take(limit + 1)
+            .read_to_end(&mut buf)
             .with_context(|| format!("reading {name}"))?;
+        if buf.len() as u64 > limit {
+            bail!("{name}: entry expands beyond {limit} bytes");
+        }
         Ok(buf)
     }
 
@@ -188,5 +196,31 @@ impl Assets {
         let mut zip = self.zip.lock().unwrap();
         let mut file = zip.by_index(i).with_context(|| format!("opening {name}"))?;
         f(&mut file)
+    }
+}
+
+#[cfg(test)]
+mod read_limit_regression {
+    use super::*;
+    #[test]
+    fn actual_zip_output_obeys_the_read_limit() {
+        use std::io::{Cursor, Write};
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        zip.start_file(
+            "Common/test",
+            zip::write::SimpleFileOptions::default()
+                .compression_method(CompressionMethod::Deflated),
+        )
+        .unwrap();
+        zip.write_all(&[b'A'; 8192]).unwrap();
+        let mut bytes = zip.finish().unwrap().into_inner();
+        let central = bytes.windows(4).position(|s| s == b"PK\x01\x02").unwrap();
+        bytes[central + 24..central + 28].copy_from_slice(&1u32.to_le_bytes());
+        bytes[22..26].copy_from_slice(&1u32.to_le_bytes());
+        let path = std::env::temp_dir().join(format!("hytale-limit-{}.zip", std::process::id()));
+        std::fs::write(&path, bytes).unwrap();
+        let a = Assets::open(&path).unwrap();
+        assert_eq!(a.size("Common/test"), Some(1));
+        assert!(a.read_limited("Common/test", 1024).is_err());
     }
 }
