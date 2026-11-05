@@ -222,5 +222,7 @@ mod read_limit_regression {
         let a = Assets::open(&path).unwrap();
         assert_eq!(a.size("Common/test"), Some(1));
         assert!(a.read_limited("Common/test", 1024).is_err());
+        drop(a);
+        std::fs::remove_file(path).unwrap();
     }
 }

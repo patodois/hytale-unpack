@@ -593,6 +593,7 @@ mod tests {
         assert_eq!(doc["images"][0]["uri"], "house%23%25%20%C3%A9_0.png");
         assert!(dir.join("house#% é.bin").is_file());
         assert!(dir.join("house#% é_0.png").is_file());
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
