@@ -204,7 +204,7 @@ Credit for the format knowledge goes to that plugin and its authors.
 
 ## Provider
 
-`hytale_unpack::bridge::Hytale` implements `rewrite_bridge::Provider` (rewrite-bridge `0.2`, from
+`hytale_unpack::bridge::Hytale` implements `rewrite_bridge::Provider` (rewrite-bridge `0.3`, from
 [crates.io](https://crates.io/crates/rewrite-bridge)). Conventions are the
 bridge's: metres, +Y up, right-handed, +Z front, counter-clockwise front faces, sRGB textures. One block (the
 game's unit) is taken as one metre, which the data does not state; it fits the player (hitbox 1.85 high,
@@ -212,15 +212,15 @@ eye height 1.6, model about 1.89 tall).
 
 To use it from another crate, depend on both. Every crate in one build has to end up with the same copy of
 rewrite-bridge, or `Hytale` implements a `Provider` that your code's `Provider` is not, and the compiler reports
-"multiple different versions of crate `rewrite_bridge`". From crates.io Cargo does this for you: every `0.2`
-requirement (this crate asks for `0.2.1`, your `"0.2"` accepts it) resolves to one 0.2.x release and is built once.
-A requirement on another minor line (`"0.3"`) would be a second copy, so stay on the same `0.x` as this crate.
+"multiple different versions of crate `rewrite_bridge`". From crates.io Cargo does this for you: every `0.3`
+requirement (this crate asks for `0.3.1`, your `"0.3"` accepts it) resolves to one 0.3.x release and is built once.
+A requirement on another minor line (`"0.2"`) would be a second copy, so stay on the same `0.x` as this crate.
 `cargo tree -i rewrite-bridge` must show a single copy.
 
 ```toml
 [dependencies]
 hytale-unpack = { git = "https://github.com/patodois/hytale-unpack" }   # add rev = "<commit>" to pin it
-rewrite-bridge = "0.2"
+rewrite-bridge = "0.3"
 ```
 
 ```rust

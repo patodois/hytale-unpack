@@ -366,9 +366,9 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rewrite-bridge"
-version = "0.2.3"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d121d5dae948906003833ccd614a06b0517a2413c6740c331f6291b7fad579d"
+checksum = "8a296e290e63610ff1c5a4ae012666464d3697ac5dfd04acff5681f46c4f37b6"
 
 [[package]]
 name = "serde"
