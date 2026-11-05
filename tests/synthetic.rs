@@ -364,3 +364,29 @@ fn referenced_clip_read_and_parse_failures_are_reported() {
         assert!(report.skipped_clips[0].1.contains("Broken.blockyanim"));
     }
 }
+
+#[test]
+fn prefab_special_component_does_not_export_to_parent() {
+    let fake = archive(&[(
+        "Server/Prefabs/...prefab.json".into(),
+        br#"{"version":8,"blocks":[]}"#.to_vec(),
+    )]);
+    let dir = std::env::temp_dir().join(format!("hytale-prefab-path-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let result = std::process::Command::new(env!("CARGO_BIN_EXE_hytale-unpack"))
+        .arg("--assets")
+        .arg(&fake.path)
+        .arg("prefab")
+        .arg("Server/Prefabs/...prefab.json")
+        .arg("-o")
+        .arg(dir.join("output"))
+        .output()
+        .unwrap();
+    assert!(
+        !dir.join("...gltf").exists(),
+        "{}",
+        String::from_utf8_lossy(&result.stdout)
+    );
+    assert!(!dir.join("...bin").exists());
+    assert!(!result.status.success());
+}

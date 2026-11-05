@@ -318,6 +318,13 @@ impl Builder {
     }
 
     fn finish(mut self, name: &str, out_dir: &Path, scene_nodes: Vec<usize>) -> Result<PathBuf> {
+        let mut components = Path::new(name).components();
+        anyhow::ensure!(
+            matches!(components.next(), Some(std::path::Component::Normal(_)))
+                && components.next().is_none()
+                && !name.contains(['/', '\\']),
+            "export name must be a normal filename component"
+        );
         fs::create_dir_all(out_dir)?;
         for (file, bytes) in &self.image_files {
             fs::write(out_dir.join(file), bytes)?;
