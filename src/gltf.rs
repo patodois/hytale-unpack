@@ -219,7 +219,7 @@ impl Builder {
         let file = format!("{stem}_{n}.png");
         self.image_files
             .push((file.clone(), encode_png(img.width, img.height, &img.rgba)?));
-        self.images.push(json!({"uri": file}));
+        self.images.push(json!({"uri": file_uri(&file)}));
         self.textures
             .push(json!({"sampler": 0, "source": self.images.len() - 1}));
         let tex = self.textures.len() - 1;
@@ -332,7 +332,7 @@ impl Builder {
             "scene": 0,
             "scenes": [{"nodes": scene_nodes}],
             "nodes": self.nodes,
-            "buffers": [{"uri": bin_name, "byteLength": self.bin.len()}],
+            "buffers": [{"uri": file_uri(&bin_name), "byteLength": self.bin.len()}],
         });
         let obj = doc.as_object_mut().unwrap();
         let mut put = |k: &str, v: Vec<Value>| {
@@ -486,6 +486,20 @@ pub fn write_scene(scene: &Scene, name: &str, out_dir: &Path) -> Result<PathBuf>
     b.finish(name, out_dir, roots)
 }
 
+// Encode relative filenames byte by byte; keep the filesystem names unchanged.
+fn file_uri(name: &str) -> String {
+    use std::fmt::Write;
+    let mut out = String::new();
+    for b in name.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
+            out.push(b as char);
+        } else {
+            write!(&mut out, "%{b:02X}").unwrap();
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -561,6 +575,17 @@ mod tests {
         let doc: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
         fs::remove_dir_all(&dir).unwrap();
         assert_eq!(doc["meshes"][0]["primitives"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn exported_file_uris_escape_reserved_and_unicode_bytes() {
+        let dir = std::env::temp_dir().join(format!("hytale-uri-{}", std::process::id()));
+        let path = write_animated(&block_with_textures(1), "house#% é", &dir).unwrap();
+        let doc: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        assert_eq!(doc["buffers"][0]["uri"], "house%23%25%20%C3%A9.bin");
+        assert_eq!(doc["images"][0]["uri"], "house%23%25%20%C3%A9_0.png");
+        assert!(dir.join("house#% é.bin").is_file());
+        assert!(dir.join("house#% é_0.png").is_file());
     }
 
     #[test]
