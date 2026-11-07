@@ -146,9 +146,9 @@ models, blocks and buildings, never clips; the clips of one model are in the out
 **Historical measurements from 23 October 2026.** These timings describe the earlier archive and reader;
   they were not remeasured for the current archive and skipped-clip reporting behavior.
   **Time and memory** (release build, M-series Mac, 16 GB, with other builds running; "peak" is the
-peak resident size): `list` 0.2 s and 120 MB (1 s when the archive's index of 68,844 entries is not in the file cache);
-`model` under 0.5 s and 90 MB; `check` about 5 s and 90 MB; `check-bridge --scenes 30` about 27 s and 460 MB (the
-24 MB prefab dominates); `check-conformance` over everything about 31 s and 490 MB. Nothing loads the archive whole.
+peak resident size): `list` 0.2 s and 120 MB (1 s when the archive's index of 60,695 entries is not in the file cache);
+`model` under 0.5 s and 80 MB; `check` about 5 s and 80 MB; `check-bridge --scenes 30` about 25 s and 300 to 390 MB (the
+23 MB prefab dominates); `check-conformance` over everything about 25 s and 400 MB. Nothing loads the archive whole.
 
 The output of `list` goes through a pipe quietly (`hytale-unpack list Kweebec | head`).
 
@@ -515,7 +515,7 @@ skipped (0), the channels trimmed (2) and the channels left out of a kept clip (
   that are special (such as `..`) instead of writing outside the output folder.
 - A clip that a model refers to but that cannot be read or parsed is reported in the load report instead of being
   skipped silently.
-- The numbers in this file were re-measured on game version 0.7.5 (build `4f7cd77ad`); the game has grown since the
+- Asset counts, excluding the historical timings, were re-measured on game version 0.7.5 (build `4f7cd77ad`); the game has grown since the
   earlier figures (more models, clips, prefabs, sounds and textures), and the real-data tests expect the new counts.
 
 ## Legal
