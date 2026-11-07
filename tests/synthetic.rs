@@ -389,4 +389,5 @@ fn prefab_special_component_does_not_export_to_parent() {
     );
     assert!(!dir.join("...bin").exists());
     assert!(!result.status.success());
+    std::fs::remove_dir_all(&dir).unwrap();
 }
