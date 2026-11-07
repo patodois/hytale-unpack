@@ -143,7 +143,9 @@ hytale-unpack check-conformance --filter Server/Models/Beast/ --limit 20   # che
 models, blocks and buildings, never clips; the clips of one model are in the output of `model <id>` (the
 `--clips <text>` filter works there too).
 
-**Time and memory** (release build, M-series Mac, 16 GB, 23 October 2026, with other builds running; "peak" is the
+**Historical measurements from 23 October 2026.** These timings describe the earlier archive and reader;
+  they were not remeasured for the current archive and skipped-clip reporting behavior.
+  **Time and memory** (release build, M-series Mac, 16 GB, with other builds running; "peak" is the
 peak resident size): `list` 0.2 s and 120 MB (1 s when the archive's index of 68,844 entries is not in the file cache);
 `model` under 0.5 s and 90 MB; `check` about 5 s and 90 MB; `check-bridge --scenes 30` about 27 s and 460 MB (the
 24 MB prefab dominates); `check-conformance` over everything about 31 s and 490 MB. Nothing loads the archive whole.
@@ -503,8 +505,10 @@ skipped (0), the channels trimmed (2) and the channels left out of a kept clip (
 
 ## Changes in 0.4.0
 
-- The `bridge` feature (on by default) now uses rewrite-bridge 0.4. Nothing in the provider changed; a program that also
-  depends on rewrite-bridge has to ask for `"0.4"` so the build holds one copy.
+- The `bridge` feature (on by default) now uses rewrite-bridge 0.4; a program that also depends on rewrite-bridge
+  has to ask for `"0.4"` so the build holds one copy.
+- The provider reports failed clip reads and parse errors through `skipped_clips`, including the clip name,
+  referenced path and reason.
 - No public item was added or removed.
 - Reading an `Assets.zip` entry is bounded by the bytes that actually come out, not by the size the archive claims for it.
 - File names written into a glTF's buffer and image URIs are escaped, and exporting a prefab refuses path components
