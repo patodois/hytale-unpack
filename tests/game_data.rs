@@ -851,6 +851,10 @@ fn invisible_asset_checks_require_an_existing_index_name() {
     zip.write_all(b"{}").unwrap();
     for name in [
         "Common/Icons/Filter_Rock.png",
+        "Common/Filter_Rock.json",
+        "Server/Models/XFilter_Rock.json",
+        "Server/Other/Filter_Rock.json",
+        "Server/Item/Items/Tool/Fixture_Item.json",
         "Server/Models/Filter_Rock_Extra.json",
         "Server/Prefabs/Filter_Rock.prefab.json",
     ] {
@@ -861,6 +865,7 @@ fn invisible_asset_checks_require_an_existing_index_name() {
     zip.finish().unwrap();
     let assets = Assets::open(&temp.0).unwrap();
     require_indexed(&assets, "Hypixel/Barrier").unwrap();
+    require_indexed(&assets, "Fixture_Item").unwrap();
     assert!(require_indexed(&assets, "Filter_Rock").is_err());
     assert!(require_indexed(&assets, "Hypixel/Missing").is_err());
 }
