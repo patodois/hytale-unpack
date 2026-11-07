@@ -55,15 +55,15 @@ fn archive_index_has_the_documented_counts() {
     let hy = need!();
     let a = hy.assets();
     let count = |ext: &str| a.names().filter(|n| n.ends_with(ext)).count();
-    assert_eq!(count(".blockymodel"), 2830);
-    assert_eq!(count(".blockyanim"), 6736);
-    assert_eq!(count(".png"), 10901);
-    assert_eq!(count(".ogg"), 4490);
+    assert_eq!(count(".blockymodel"), 3201);
+    assert_eq!(count(".blockyanim"), 7123);
+    assert_eq!(count(".png"), 11854);
+    assert_eq!(count(".ogg"), 6247);
     assert_eq!(
         a.names_under("Server/Prefabs/")
             .filter(|n| n.ends_with(".prefab.json"))
             .count(),
-        7828
+        9282
     );
 }
 
@@ -281,12 +281,13 @@ fn list_filters_by_substring_and_tags_kinds() {
 fn list_offers_only_what_draws() {
     let hy = need!();
     // editor tools whose BlockType only names a block list or a prefab list, an invisible block, and
-    // entity definitions that are only particles
+    // entity definitions that are only particles. `Hypixel/Barrier` is the invisible block's own path:
+    // plain "Barrier" also matches VFX spawners that draw a debug model
     for id in [
         "Filter_TreeWoodAndLeaves",
         "Filter_Rock",
         "ExamplePrefabPlacementBlock_Tree",
-        "Barrier",
+        "Hypixel/Barrier",
         "Showcase_Mannequin_Inv_Portal",
     ] {
         let l = hy.list(id).unwrap();
@@ -556,12 +557,12 @@ fn the_body_without_attachments_is_what_loaded_before() {
     let (with, _) = hy.load_animated_with(id, true).unwrap();
     let (bare, report) = hy.load_animated_with(id, false).unwrap();
     assert!(report.attachments.is_empty() && report.attachments_left_out.is_empty());
-    assert_eq!(bare.model.nodes.len(), 57);
-    assert_eq!(bare.model.meshes.len(), 21);
+    assert_eq!(bare.model.nodes.len(), 53);
+    assert_eq!(bare.model.meshes.len(), 17);
     assert!(with.model.nodes.len() > bare.model.nodes.len());
     // the body's own nodes and meshes come first and are unchanged
-    assert_eq!(with.model.nodes[..57], bare.model.nodes[..]);
-    assert_eq!(with.model.meshes[..21], bare.model.meshes[..]);
+    assert_eq!(with.model.nodes[..53], bare.model.nodes[..]);
+    assert_eq!(with.model.meshes[..17], bare.model.meshes[..]);
     // and its materials: the bare body's one material (its texture, tinted by the entity's own
     // gradient where the data pairs them, with or without attachments) comes first and is equal
     let n = bare.model.materials.len();
@@ -618,7 +619,7 @@ fn the_entity_gradient_applies_only_where_the_data_pairs_it_with_the_texture() {
     let elf = load("Server/Models/NPC_Elf.json");
     assert_eq!(elf.tint, None);
     assert!(elf.tint_not_applied.is_some());
-    // 7 of the 145 definitions with a gradient pair it with their texture
+    // 7 of the 164 definitions with a gradient pair it with their texture
     let (mut paired, mut with_gradient) = (0, 0);
     for id in hy.defs().model_paths() {
         let def = hy.defs().model_def(hy.assets(), id).unwrap();
@@ -628,7 +629,7 @@ fn the_entity_gradient_applies_only_where_the_data_pairs_it_with_the_texture() {
         with_gradient += 1;
         paired += def.gradient_paired() as usize;
     }
-    assert_eq!((paired, with_gradient), (7, 145));
+    assert_eq!((paired, with_gradient), (7, 164));
 }
 
 #[test]
@@ -814,5 +815,5 @@ fn nodes_named_like_earlier_ones_are_listed_and_kept() {
             }
         }
     }
-    assert_eq!((models, nodes), (61, 528));
+    assert_eq!((models, nodes), (78, 682));
 }
