@@ -290,6 +290,7 @@ fn list_offers_only_what_draws() {
         "Hypixel/Barrier",
         "Showcase_Mannequin_Inv_Portal",
     ] {
+        require_indexed(hy.assets(), id).unwrap();
         let l = hy.list(id).unwrap();
         assert!(
             l.is_empty(),
@@ -816,4 +817,37 @@ fn nodes_named_like_earlier_ones_are_listed_and_kept() {
         }
     }
     assert_eq!((models, nodes), (78, 682));
+}
+
+fn require_indexed(assets: &Assets, id: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        assets.names().any(|name| name.contains(id)),
+        "expected asset {id:?} is absent from the archive index"
+    );
+    Ok(())
+}
+
+#[test]
+fn invisible_asset_checks_require_an_existing_index_name() {
+    use std::io::Write;
+    struct Temp(std::path::PathBuf);
+    impl Drop for Temp {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    let temp = Temp(
+        std::env::temp_dir().join(format!("hytale-index-presence-{}.zip", std::process::id())),
+    );
+    let mut zip = zip::ZipWriter::new(std::fs::File::create(&temp.0).unwrap());
+    zip.start_file(
+        "Server/Models/Hypixel/Barrier.json",
+        zip::write::SimpleFileOptions::default(),
+    )
+    .unwrap();
+    zip.write_all(b"{}").unwrap();
+    zip.finish().unwrap();
+    let assets = Assets::open(&temp.0).unwrap();
+    require_indexed(&assets, "Hypixel/Barrier").unwrap();
+    assert!(require_indexed(&assets, "Hypixel/Missing").is_err());
 }
