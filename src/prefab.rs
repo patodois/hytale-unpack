@@ -1,5 +1,5 @@
-//! `*.prefab.json`: Hytale's building blueprints (`Server/Prefabs/**`, 7,829 files, 1.8 GB of
-//! JSON; the biggest is 23 MB).
+//! `*.prefab.json`: Hytale's building blueprints (`Server/Prefabs/**`, 9,285 files, 2.0 GB of
+//! JSON; the biggest is 24 MB).
 //!
 //! ```text
 //! { "version": 8, "blockIdVersion": 11,

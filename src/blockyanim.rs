@@ -1,6 +1,6 @@
 //! `.blockyanim`: Hytale's animation clips.
 //!
-//! JSON again; fields as found in the install (6,736 files) and as the Blockbench plugin reads
+//! JSON again; fields as found in the install (7,123 files) and as the Blockbench plugin reads
 //! them (see [`crate::blockymodel`] for the plugin's credit):
 //!
 //! ```text

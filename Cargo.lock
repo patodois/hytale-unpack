@@ -183,7 +183,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hytale-unpack"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -294,9 +294,9 @@ dependencies = [
 
 [[package]]
 name = "rewrite-bridge"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a296e290e63610ff1c5a4ae012666464d3697ac5dfd04acff5681f46c4f37b6"
+checksum = "73b1e463fa808a2b4c25d48c214f0cdc66ff09db3c283009f031534e331b3587"
 
 [[package]]
 name = "serde"

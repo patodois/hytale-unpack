@@ -3,7 +3,7 @@
 //!
 //! Models and clips are read into a buffer (the biggest is under 1 MB). Prefabs are streamed from
 //! the archive through [`crate::prefab::stream`] without buffering them, so the memory used does
-//! not depend on the 23 MB prefabs. Entries are never kept after they are checked.
+//! not depend on the 24 MB prefabs. Entries are never kept after they are checked.
 
 use std::collections::BTreeMap;
 use std::time::Instant;

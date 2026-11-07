@@ -1,6 +1,6 @@
 [package]
 name = "hytale-unpack"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 description = "Reader for Hytale's Assets.zip: blocky models, animations and prefabs, with a rewrite-bridge provider"
 license = "MIT OR Apache-2.0"
@@ -15,10 +15,10 @@ png = "0.18.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 # Assets.zip stores every entry uncompressed, but the crate reads the central directory once and
-# then seeks to single entries, which is all we need (the archive is 3.5 GB: never read it whole)
+# then seeks to single entries, which is all we need (the archive is 3.9 GB: never read it whole)
 zip = { version = "8", default-features = false, features = ["deflate"] }
 # The bridge to other game rewrites (see src/bridge.rs, github.com/patodois/rewrite-bridge)
-rewrite-bridge = { version = "0.3.1", optional = true }
+rewrite-bridge = { version = "0.4", optional = true }
 
 # The peak memory report of `check`
 [target.'cfg(unix)'.dependencies]

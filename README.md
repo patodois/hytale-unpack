@@ -5,10 +5,10 @@
 
 A small Rust reader for the game data of Hytale, read from your own install:
 
-- `Assets.zip` (3.5 GB, 60,695 entries), through its central directory and single entries, never whole;
-- `.blockymodel` (2,830 models: node trees of boxes and quads with texture layouts);
-- `.blockyanim` (6,736 clips);
-- prefabs (`Server/Prefabs/**.prefab.json`, 7,828 buildings, 20.6 million block cells);
+- `Assets.zip` (3.9 GB, 68,844 entries), through its central directory and single entries, never whole;
+- `.blockymodel` (3,201 models: node trees of boxes and quads with texture layouts);
+- `.blockyanim` (7,123 clips);
+- prefabs (`Server/Prefabs/**.prefab.json`, 9,282 buildings, 22.7 million block cells);
 - the JSON definitions that link them: entity models (`Server/Models`), items and blocks (`Server/Item/Items`),
   the attachments an entity wears and the tint gradients of its textures;
 - a [rewrite-bridge](https://github.com/patodois/rewrite-bridge) `Provider` for all of it, so other game
@@ -43,7 +43,7 @@ the checksum of every archive (`shasum -a 256 -c SHA256SUMS` on macOS, `sha256su
 that the list itself came from here. With the downloads in one folder (needs OpenSSL 3):
 
 ```sh
-sh tools/verify-release.sh hytale-unpack v0.3.0 path/to/folder
+sh tools/verify-release.sh hytale-unpack v0.4.0 path/to/folder
 ```
 
 The signed text is `osp release patodois/hytale-unpack <tag>`, a newline, then `SHA256SUMS`, so a signature from another release
@@ -79,7 +79,7 @@ To build it yourself instead, see [Build and use](#build-and-use).
   1.99). Cargo downloads [rewrite-bridge](https://crates.io/crates/rewrite-bridge) from crates.io.
   A first release build takes about 10 seconds on an M-series Mac with 4 jobs (`cargo build --release -j 4`),
   plus the dependency download.
-- **Disk and memory.** Nothing is extracted: the 3.5 GB archive is read entry by entry. The commands below
+- **Disk and memory.** Nothing is extracted: the 3.9 GB archive is read entry by entry. The commands below
   need between 100 MB and 350 MB of RAM (numbers beside each command), so a small laptop is fine.
 
 ## Words used here
@@ -144,9 +144,9 @@ models, blocks and buildings, never clips; the clips of one model are in the out
 `--clips <text>` filter works there too).
 
 **Time and memory** (release build, M-series Mac, 16 GB, 23 October 2026, with other builds running; "peak" is the
-peak resident size): `list` 0.2 s and 120 MB (1 s when the archive's index of 60,695 entries is not in the file cache);
-`model` under 0.5 s and 90 MB; `check` about 5 s and 80 MB; `check-bridge --scenes 30` about 25 s and 300 to 390 MB (the
-23 MB prefab dominates); `check-conformance` over everything about 25 s and 400 MB. Nothing loads the archive whole.
+peak resident size): `list` 0.2 s and 120 MB (1 s when the archive's index of 68,844 entries is not in the file cache);
+`model` under 0.5 s and 90 MB; `check` about 5 s and 90 MB; `check-bridge --scenes 30` about 27 s and 460 MB (the
+24 MB prefab dominates); `check-conformance` over everything about 31 s and 490 MB. Nothing loads the archive whole.
 
 The output of `list` goes through a pipe quietly (`hytale-unpack list Kweebec | head`).
 
@@ -158,15 +158,16 @@ install exists, and skip otherwise.
 
 ## The install this was written against
 
-`~/Library/Application Support/Hytale/install/release/package/game/latest/`, 3.8 GB: `Assets.zip`,
-`Client/`, `Server/` (including `HytaleServer.jar`, which this crate does not touch).
+`~/Library/Application Support/Hytale/install/release/package/game/latest/`, 4.6 GB: `Assets.zip`,
+`Client/`, `Server/` (including `HytaleServer.jar`, which this crate does not touch). The numbers in this file are from
+game version 0.7.5 (build `4f7cd77ad`), as it was installed on 2026-11-05.
 
 Every `Assets.zip` entry is *stored* (method 0), so reading an entry is a seek and a copy. Entries are flat
 paths: `Common/` (what the client needs: `Blocks`, `Characters`, `Cosmetics`, `Items`, `NPC`, `Icons`, `Sounds`,
 textures), `Server/` (JSON game data: `Models`, `Item`, `NPC`, `Prefabs`, `World`, `Particles`, `Audio`, ...) and
-`Cosmetics/`. By extension: 32,936 `.json`, 10,901 `.png`, 4,490 `.ogg`, 2,830 `.blockymodel`, 6,736
-`.blockyanim`, 1,762 `.particlespawner`, 602 `.particlesystem`. `Server/Prefabs` holds 7,829 JSON files:
-7,828 prefabs and one `BranchInfo.json`.
+`Cosmetics/`. By extension: 36,538 `.json`, 11,854 `.png`, 6,247 `.ogg`, 3,201 `.blockymodel`, 7,123
+`.blockyanim`, 2,534 `.particlespawner`, 820 `.particlesystem`. `Server/Prefabs` holds 9,285 JSON files:
+9,282 prefabs, one `BranchInfo.json` and two stray copies named like `Windmills_002.prefab (1).json`, which are not read as prefabs.
 
 ## Formats as decoded
 
@@ -191,7 +192,7 @@ position adds, orientation composes after the rest orientation, stretch multipli
 
 **Prefabs** are `{version: 8, blockIdVersion: 11, anchorX/Y/Z, blocks: [{x, y, z, name, rotation?, filler?,
 support?, components?}], entities, fluids}`. `name` is an item id. A cell named `*Rail_State_Definitions_Corner_Left`
-is the item `Rail` in state `Corner_Left`; `Empty` is air. They are streamed: the biggest is 23 MB of JSON.
+is the item `Rail` in state `Corner_Left`; `Empty` is air. They are streamed: the biggest is 24 MB of JSON.
 
 **Definitions** use `"Parent": "<id>"` inheritance (objects merge recursively, everything else is replaced); a
 `BlockType` can have its own `Parent` too. `Server/Models/**.json` give an entity's `Model`, `Texture` and
@@ -204,7 +205,7 @@ Credit for the format knowledge goes to that plugin and its authors.
 
 ## Provider
 
-`hytale_unpack::bridge::Hytale` implements `rewrite_bridge::Provider` (rewrite-bridge `0.3`, from
+`hytale_unpack::bridge::Hytale` implements `rewrite_bridge::Provider` (rewrite-bridge `0.4`, from
 [crates.io](https://crates.io/crates/rewrite-bridge)). Conventions are the
 bridge's: metres, +Y up, right-handed, +Z front, counter-clockwise front faces, sRGB textures. One block (the
 game's unit) is taken as one metre, which the data does not state; it fits the player (hitbox 1.85 high,
@@ -212,15 +213,15 @@ eye height 1.6, model about 1.89 tall).
 
 To use it from another crate, depend on both. Every crate in one build has to end up with the same copy of
 rewrite-bridge, or `Hytale` implements a `Provider` that your code's `Provider` is not, and the compiler reports
-"multiple different versions of crate `rewrite_bridge`". From crates.io Cargo does this for you: every `0.3`
-requirement (this crate asks for `0.3.1`, your `"0.3"` accepts it) resolves to one 0.3.x release and is built once.
-A requirement on another minor line (`"0.2"`) would be a second copy, so stay on the same `0.x` as this crate.
+"multiple different versions of crate `rewrite_bridge`". From crates.io Cargo does this for you: every `0.4`
+requirement (this crate asks for `0.4`, your `"0.4"` accepts it) resolves to one 0.4.x release and is built once.
+A requirement on another minor line (`"0.3"`) would be a second copy, so stay on the same `0.x` as this crate.
 `cargo tree -i rewrite-bridge` must show a single copy.
 
 ```toml
 [dependencies]
 hytale-unpack = { git = "https://github.com/patodois/hytale-unpack" }   # add rev = "<commit>" to pin it
-rewrite-bridge = "0.3"
+rewrite-bridge = "0.4"
 ```
 
 ```rust
@@ -403,21 +404,21 @@ hytale-unpack check-conformance --id Server/Models/Beast/Rat.json -v       # one
 load as they are, not worn.)
 
 On the install this was written against, every listed model, block and prefab loads, and no clip name repeats:
-0 errors. A full run (`hytale-unpack check-conformance`, 14,037 assets, about 25 s, peak RSS 370 MB) ends with this
+0 errors. A full run (`hytale-unpack check-conformance`, 16,157 assets, about 31 s, peak RSS 490 MB) ends with this
 table of warnings, which come from the game's data or from what is left out, not from the loading:
 
 | warning | count | assets | what it means here |
 |---|---:|---:|---|
-| `animation.zero_scale` | 1,824 | 243 | clips hide a node by scaling it to zero: the blink (`L-Eye`, eyelids) in nearly all of them |
-| `orientation.feet_off_ground` | 541 | 541 | the lowest point is more than 0.3 m from the ground: attachment pieces modelled at head height (hair, beards, hats, eyes, ears) and a few flying creatures (bat, hawk, raven) |
-| `animation.empty` | 409 | 409 | clips with no channels because they only move nodes the model lacks: bare attachment models (eyes, hair) loaded on their own, or another block's animation such as `Candle_Burn`, which a block model picks up from its folder |
-| `geometry.degenerate_triangles` | 129 | 20 | triangles with no area: boxes of zero thickness in hair and costume pieces and a few bones |
-| `scale.height_out_of_range` | 103 | 103 | under 0.2 m high: small pieces (eyebrows, shoes, gloves, a rattle) |
-| `scene.empty` | 50 | 50 | prefabs whose cells are all `Empty` (they carve holes in terrain, e.g. `Klops_Basalt_Cave_001`) |
-| `front.not_plus_z` | 51 | 49 | node names such as `Front`, `Nose` or `Eye` that point along +X or -X (24 of the assets are prefabs, i.e. block models inside them); the data does not say which way a block faces, so they are left as they are. One more than before attachments: `Zombie_Aberrant` now wears its big eyes (`L-Eye-Big`, `R-Eye-Big`), which the checker finds facing -X |
-| `orientation.not_upright` | 25 | 25 | flat pieces (ears, earrings, eyebrows, bracers) that are wider than tall |
-| `scale.too_small` | 2 | 2 | the two earring models |
-| `geometry.no_vertices` | 1 | 1 | `Common/NPC/MISC/Empty.blockymodel`, an empty model on purpose |
+| `animation.zero_scale` | 1,848 | 245 | clips hide a node by scaling it to zero: the blink (`L-Eye`, eyelids) in nearly all of them |
+| `orientation.feet_off_ground` | 700 | 700 | the lowest point is more than 0.3 m from the ground: attachment pieces modelled at head height (hair, beards, hats, eyes, ears) and a few flying creatures (bat, hawk, raven) |
+| `animation.empty` | 529 | 529 | clips with no channels because they only move nodes the model lacks: bare attachment models (eyes, hair) loaded on their own, or another block's animation such as `Candle_Burn`, which a block model picks up from its folder |
+| `geometry.degenerate_triangles` | 333 | 103 | triangles with no area: boxes of zero thickness in hair and costume pieces and a few bones |
+| `scale.height_out_of_range` | 139 | 139 | under 0.2 m high: small pieces (eyebrows, shoes, gloves, a rattle) |
+| `scene.empty` | 59 | 59 | prefabs whose cells are all `Empty` (they carve holes in terrain, e.g. `Klops_Basalt_Cave_001`) |
+| `front.not_plus_z` | 79 | 75 | node names such as `Front`, `Nose` or `Eye` that point along +X or -X (36 of the assets are prefabs, i.e. block models inside them); the data does not say which way a block faces, so they are left as they are; `Zombie_Aberrant` wears big eyes (`L-Eye-Big`, `R-Eye-Big`), which the checker finds facing -X |
+| `orientation.not_upright` | 37 | 37 | flat pieces (ears, earrings, eyebrows, bracers) that are wider than tall |
+| `scale.too_small` | 4 | 4 | the two earring models and the two lip piercings |
+| `geometry.no_vertices` | 6 | 6 | `Common/NPC/MISC/Empty.blockymodel` and five projectile or marker model definitions that have no shape, empty on purpose |
 
 Counts are findings, assets are the assets with at least one (an asset can have several of one code).
 
@@ -456,20 +457,23 @@ Used to check by eye (exported glTF files and renders are game content and are n
 
 | | ok | failed |
 |---|---:|---:|
-| `.blockymodel` | 2,830 | 0 |
-| `.blockyanim` | 6,736 | 0 |
-| prefabs | 7,828 | 0 |
+| `.blockymodel` | 3,201 | 0 |
+| `.blockyanim` | 7,123 | 0 |
+| prefabs | 9,282 | 0 |
 
-39,440 nodes, 452,392 keyframes, 20,559,261 block cells (37,367 fillers), 207,019 fluid cells, 4,441 entities.
-Prefab versions: all `version 8` / `blockIdVersion 11`. Block `rotation` values seen: 1 to 11 only. Two clips have
-a keyframe past their `duration` (noted, not an error). **Peak RSS 79 MB, about 5 s** (`/usr/bin/time -l`: 79 MB).
+47,711 nodes, 529,731 keyframes, 22,735,704 block cells (43,692 fillers), 229,382 fluid cells, 6,192 entities.
+Prefab versions: `version 8` with `blockIdVersion 11` in 9,276 and `blockIdVersion 8` in 6. Block `rotation` values seen: 1 to 19,
+24 to 27, 32 to 35 and 48 to 51; under the `yaw + 4 * pitch + 16 * roll` reading the values from 16 up carry a roll, and
+its direction is not verified (see [What is left out](#what-is-left-out)). 25 clips have a keyframe outside their
+`duration` (noted, not an error). **Peak RSS 88 MB, about 5 s.**
 
-`check-bridge --scenes 30` loads all 436 entity models with a model (69,323 clips built), all 2,830 bare models,
-all 2,956 block items and all 7,828 prefabs as scenes (14.75 million instances), validating each: 0 failures,
-no unresolved block names. Peak RSS 300 to 390 MB (the 23 MB prefab dominates), about 25 s. It also prints the
-attachment tally: 179 models wear 710 attachments (1,888 pieces merged); 106 models have entries left out (117
-random sets, 1 weighted entry, 67 entries that add nothing), and counts the clips skipped (0), the channels
-trimmed (2) and the channels left out of a kept clip (0).
+`check-bridge --scenes 30` loads all 502 entity models with a model (79,357 clips built), all 3,201 bare models,
+all 3,186 block items and all 9,282 prefabs as scenes (16.53 million instances), validating each: 0 failures.
+Two block names in prefabs (`Barrier`, 41 cells, and `Spawn_Goblin_Initial_Breach_Marker`, 1 cell) are blocks the game
+does not draw (`DrawType: Empty`), so they match no drawable block and are not placed. Peak RSS 460 MB (the 24 MB prefab
+dominates), about 27 s. It also prints the attachment tally: 196 models wear 772 attachments (2,034 pieces merged); 130
+models have entries left out (219 random sets, 1 weighted entry, 72 entries that add nothing), and counts the clips
+skipped (0), the channels trimmed (2) and the channels left out of a kept clip (0).
 
 ## What is left out
 
@@ -491,10 +495,24 @@ trimmed (2) and the channels left out of a kept clip (0).
   face's own, unrotated. Only 13 items give distinct side textures.
 - Block `rotation`: the reading `yaw + 4 * pitch` is inferred from the values. **Yaw is verified** against real
   data (roofs climb towards -Z, -X, +Z, +X for 0 to 3, tested in `tests/game_data.rs`). The pitch and roll
-  directions could not be checked (symmetric blocks only, or no roll values at all) and use the same
+  directions could not be checked (symmetric blocks only; roll values now occur in the data, 16 and up, but on blocks
+  that were not checked against anything) and use the same
   right-handed sign; `bridge::ROTATION_SIGNS` flips them in one place if they prove wrong.
 - The meaning of `filler` offsets is not decoded; only "does not draw again" is used.
 - The server (`HytaleServer.jar`) is not touched.
+
+## Changes in 0.4.0
+
+- The `bridge` feature (on by default) now uses rewrite-bridge 0.4. Nothing in the provider changed; a program that also
+  depends on rewrite-bridge has to ask for `"0.4"` so the build holds one copy.
+- No public item was added or removed.
+- Reading an `Assets.zip` entry is bounded by the bytes that actually come out, not by the size the archive claims for it.
+- File names written into a glTF's buffer and image URIs are escaped, and exporting a prefab refuses path components
+  that are special (such as `..`) instead of writing outside the output folder.
+- A clip that a model refers to but that cannot be read or parsed is reported in the load report instead of being
+  skipped silently.
+- The numbers in this file were re-measured on game version 0.7.5 (build `4f7cd77ad`); the game has grown since the
+  earlier figures (more models, clips, prefabs, sounds and textures), and the real-data tests expect the new counts.
 
 ## Legal
 

@@ -1,6 +1,6 @@
 //! Access to Hytale's `Assets.zip`.
 //!
-//! `Assets.zip` (about 3.5 GB, 60,000 entries) is an ordinary zip file. In the install checked while
+//! `Assets.zip` (about 3.9 GB, 69,000 entries) is an ordinary zip file. In the install checked while
 //! writing this crate every entry is *stored* (compression method 0), and the entries are flat
 //! paths such as `Common/Characters/Player.blockymodel` or `Server/Models/Human/Player.json`.
 //!
@@ -33,7 +33,7 @@ use zip::{CompressionMethod, ZipArchive};
 const MAC_INSTALL: &str =
     "Library/Application Support/Hytale/install/release/package/game/latest/Assets.zip";
 
-/// Entries bigger than this are refused by [`Assets::read`] (the biggest in the install is 23 MB,
+/// Entries bigger than this are refused by [`Assets::read`] (the biggest in the install is 24 MB,
 /// a prefab); use [`Assets::with_reader`] to stream anything larger.
 const READ_LIMIT: u64 = 256 << 20;
 

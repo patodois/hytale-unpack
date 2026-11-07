@@ -9,7 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-rewrite-bridge = "0.3.1"
+rewrite-bridge = "0.4"
 serde_json = { version = "1", features = ["preserve_order"] }
 zip = { version = "8", default-features = false, features = ["deflate"] }
 

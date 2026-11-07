@@ -900,7 +900,7 @@ impl Hytale {
                 self.place(b);
             }
         }
-        // Two passes over the entry's bytes (23 MB at most): the first for the anchor, which the
+        // Two passes over the entry's bytes (24 MB at most): the first for the anchor, which the
         // blocks are placed relative to, the second for the blocks. Neither keeps the document.
         let bytes = self.assets.read(id)?;
         struct Nop;
