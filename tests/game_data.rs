@@ -821,7 +821,10 @@ fn nodes_named_like_earlier_ones_are_listed_and_kept() {
 
 fn require_indexed(assets: &Assets, id: &str) -> anyhow::Result<()> {
     anyhow::ensure!(
-        assets.names().any(|name| name.contains(id)),
+        assets.names().any(|name| {
+            (name.starts_with("Server/Models/") || name.starts_with("Server/Item/Items/"))
+                && name.ends_with(&format!("/{id}.json"))
+        }),
         "expected asset {id:?} is absent from the archive index"
     );
     Ok(())
@@ -846,8 +849,18 @@ fn invisible_asset_checks_require_an_existing_index_name() {
     )
     .unwrap();
     zip.write_all(b"{}").unwrap();
+    for name in [
+        "Common/Icons/Filter_Rock.png",
+        "Server/Models/Filter_Rock_Extra.json",
+        "Server/Prefabs/Filter_Rock.prefab.json",
+    ] {
+        zip.start_file(name, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(b"{}").unwrap();
+    }
     zip.finish().unwrap();
     let assets = Assets::open(&temp.0).unwrap();
     require_indexed(&assets, "Hypixel/Barrier").unwrap();
+    assert!(require_indexed(&assets, "Filter_Rock").is_err());
     assert!(require_indexed(&assets, "Hypixel/Missing").is_err());
 }
