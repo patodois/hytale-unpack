@@ -147,7 +147,7 @@ models, blocks and buildings, never clips; the clips of one model are in the out
   they were not remeasured for the current archive and skipped-clip reporting behavior.
   **Time and memory** (release build, M-series Mac, 16 GB, with other builds running; "peak" is the
 peak resident size): `list` 0.2 s and 120 MB (1 s when the archive's index of 60,695 entries is not in the file cache);
-`model` under 0.5 s and 80 MB; `check` about 5 s and 80 MB; `check-bridge --scenes 30` about 25 s and 300 to 390 MB (the
+`model` under 0.5 s and 90 MB; `check` about 5 s and 80 MB; `check-bridge --scenes 30` about 25 s and 300 to 390 MB (the
 23 MB prefab dominates); `check-conformance` over everything about 25 s and 400 MB. Nothing loads the archive whole.
 
 The output of `list` goes through a pipe quietly (`hytale-unpack list Kweebec | head`).
