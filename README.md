@@ -3,7 +3,7 @@
 [![rewrite-bridge on crates.io](https://img.shields.io/crates/v/rewrite-bridge.svg?label=rewrite-bridge)](https://crates.io/crates/rewrite-bridge)
 [![rewrite-bridge docs](https://img.shields.io/docsrs/rewrite-bridge?label=docs.rs)](https://docs.rs/rewrite-bridge)
 
-A small Rust reader for the game data of Hytale, read from your own install:
+hytale-unpack reads models, animations and prefabs from your own Hytale installation for asset-tool and game-rewrite developers.
 
 - `Assets.zip` (3.9 GB, 68,844 entries), through its central directory and single entries, never whole;
 - `.blockymodel` (3,201 models: node trees of boxes and quads with texture layouts);
