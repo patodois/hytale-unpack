@@ -503,6 +503,12 @@ skipped (0), the channels trimmed (2) and the channels left out of a kept clip (
 - The meaning of `filler` offsets is not decoded; only "does not draw again" is used.
 - The server (`HytaleServer.jar`) is not touched.
 
+## Changes after 0.4.0 (not yet released)
+
+- The streaming reader of `Assets::with_reader`, which `check` and `prefab` read prefabs through, is bounded like
+  `Assets::read`: an entry that claims more than 256 MiB is refused, and a read fails once more than that has
+  actually come out. It had no bound before. The biggest entry in the install is 24 MB.
+
 ## Changes in 0.4.0
 
 - The `bridge` feature (on by default) now uses rewrite-bridge 0.4; a program that also depends on rewrite-bridge

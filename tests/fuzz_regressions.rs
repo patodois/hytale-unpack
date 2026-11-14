@@ -271,6 +271,51 @@ fn a_stored_entry_reserves_no_more_than_it_stores() {
     assert!(peak < 1 << 12, "reserved {peak} bytes for a stored entry");
 }
 
+/// Found by review: the streaming reader of `Assets::with_reader` (what `check` and `prefab` read
+/// prefabs through) had no bound at all, so a prefab of a few hundred kilobytes that inflates to
+/// gigabytes cost unbounded time, and unbounded memory in a parser that keeps what it reads. The
+/// entry here holds 1 GiB of zeros in about 1 MB and claims 16 bytes; the reader must fail after
+/// the 256 MiB every other read is held to, not hand all of it over.
+#[test]
+fn a_small_entry_that_inflates_to_a_gigabyte_is_refused_by_the_streaming_reader() {
+    const LIMIT: u64 = 256 << 20;
+    let mut buf = Vec::new();
+    {
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        zip.start_file("Server/Prefabs/Bomb.prefab.json", opts)
+            .unwrap();
+        let chunk = vec![0u8; 1 << 20];
+        for _ in 0..1024 {
+            zip.write_all(&chunk).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+    assert!(buf.len() < 2 << 20, "{} bytes", buf.len());
+    let find = |sig: &[u8; 4]| buf.windows(4).position(|w| w == sig).unwrap();
+    let (local, central) = (find(b"PK\x03\x04"), find(b"PK\x01\x02"));
+    buf[local + 22..local + 26].copy_from_slice(&16u32.to_le_bytes());
+    buf[central + 24..central + 28].copy_from_slice(&16u32.to_le_bytes());
+    let zip = Temp::new(&buf);
+    let assets = Assets::open(&zip.0).unwrap();
+    assert_eq!(assets.size("Server/Prefabs/Bomb.prefab.json"), Some(16));
+    let mut handed_over = 0u64;
+    let result = assets.with_reader("Server/Prefabs/Bomb.prefab.json", |r| {
+        let mut chunk = vec![0u8; 1 << 16];
+        loop {
+            match r.read(&mut chunk) {
+                Ok(0) => return Ok(()),
+                Ok(n) => handed_over += n as u64,
+                Err(e) => return Err(e.into()),
+            }
+        }
+    });
+    assert_eq!(handed_over, LIMIT, "bytes the reader handed over");
+    let err = result.unwrap_err();
+    assert!(format!("{err:#}").contains("expands beyond"), "{err:#}");
+}
+
 use hytale_unpack::image::{decode_png, encode_png};
 
 /// Found by review: a valid 6000 x 6000 PNG (152 KB, 144 MB decoded) was refused by a cap of

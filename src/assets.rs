@@ -22,7 +22,7 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::Read;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -33,8 +33,9 @@ use zip::{CompressionMethod, ZipArchive};
 const MAC_INSTALL: &str =
     "Library/Application Support/Hytale/install/release/package/game/latest/Assets.zip";
 
-/// Entries bigger than this are refused by [`Assets::read`] (the biggest in the install is 24 MB,
-/// a prefab); use [`Assets::with_reader`] to stream anything larger.
+/// No read hands out more than this many bytes of one entry: [`Assets::read`] refuses a bigger
+/// entry, and the reader of [`Assets::with_reader`] fails once more has come out. The biggest
+/// entry in the install is 24 MB, a prefab, so the limit is ten times what the game ships.
 const READ_LIMIT: u64 = 256 << 20;
 
 pub struct Assets {
@@ -183,17 +184,81 @@ impl Assets {
 
     /// Runs `f` on a streaming reader of one entry, without buffering the entry. The archive stays
     /// locked while `f` runs, so `f` must not call back into `self`.
+    ///
+    /// The reader is bounded like [`Assets::read`]: an entry that claims more than 256 MiB is
+    /// refused before `f` runs, and a read fails as soon as more than that has actually come
+    /// out, whatever the archive claims (a compressed entry can expand far beyond its claim).
     pub fn with_reader<T>(
         &self,
         name: &str,
         f: impl FnOnce(&mut dyn Read) -> Result<T>,
     ) -> Result<T> {
+        self.with_reader_limited(name, READ_LIMIT, f)
+    }
+
+    fn with_reader_limited<T>(
+        &self,
+        name: &str,
+        limit: u64,
+        f: impl FnOnce(&mut dyn Read) -> Result<T>,
+    ) -> Result<T> {
         let i = self
             .lookup(name)
             .ok_or_else(|| anyhow!("{name}: not in Assets.zip"))?;
+        if self.sizes[i] > limit {
+            bail!("{name}: {} bytes is too big to read", self.sizes[i]);
+        }
         let mut zip = self.zip.lock().unwrap();
-        let mut file = zip.by_index(i).with_context(|| format!("opening {name}"))?;
-        f(&mut file)
+        let file = zip.by_index(i).with_context(|| format!("opening {name}"))?;
+        let mut bounded = Bounded {
+            inner: file,
+            left: limit,
+            limit,
+            name,
+            over: false,
+        };
+        f(&mut bounded)
+    }
+}
+
+/// A reader that hands out at most `limit` bytes of `inner`. One byte more is an error, not an end
+/// of file: a cut entry must not look like a whole one to the parser that reads it.
+struct Bounded<'a, R> {
+    inner: R,
+    /// Bytes that may still be handed out
+    left: u64,
+    limit: u64,
+    name: &'a str,
+    over: bool,
+}
+
+impl<R: Read> Read for Bounded<'_, R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        if !self.over {
+            // Ask for one byte more than is left, so that an entry of exactly the limit ends in
+            // an ordinary end of file and only a longer one is refused
+            let ask = usize::try_from(self.left.saturating_add(1))
+                .unwrap_or(usize::MAX)
+                .min(buf.len());
+            let n = self.inner.read(&mut buf[..ask])?;
+            if n as u64 <= self.left {
+                self.left -= n as u64;
+                return Ok(n);
+            }
+            // The entry is longer than the limit: hand over what is still allowed, then fail
+            self.over = true;
+            let allowed = std::mem::take(&mut self.left) as usize;
+            if allowed > 0 {
+                return Ok(allowed);
+            }
+        }
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{}: entry expands beyond {} bytes", self.name, self.limit),
+        ))
     }
 }
 
@@ -238,5 +303,126 @@ mod bounded_read_consumption {
         read_bounded(&mut source, 1024, &mut out).unwrap();
         assert_eq!(source.position(), 1025);
         assert_eq!(out.len(), 1025);
+    }
+}
+
+#[cfg(test)]
+mod streaming_read_limit {
+    use super::*;
+    use std::io::{Cursor, Write};
+
+    /// An archive of one DEFLATE entry `Server/Prefabs/a.prefab.json` holding `content`, whose
+    /// headers claim `claimed` bytes for it
+    fn archive(content: &[u8], claimed: u32, tag: &str) -> (Assets, PathBuf) {
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        zip.start_file(
+            "Server/Prefabs/a.prefab.json",
+            zip::write::SimpleFileOptions::default()
+                .compression_method(CompressionMethod::Deflated),
+        )
+        .unwrap();
+        zip.write_all(content).unwrap();
+        let mut bytes = zip.finish().unwrap().into_inner();
+        let local = bytes.windows(4).position(|s| s == b"PK\x03\x04").unwrap();
+        let central = bytes.windows(4).position(|s| s == b"PK\x01\x02").unwrap();
+        bytes[local + 22..local + 26].copy_from_slice(&claimed.to_le_bytes());
+        bytes[central + 24..central + 28].copy_from_slice(&claimed.to_le_bytes());
+        let path = std::env::temp_dir().join(format!(
+            "hytale-stream-limit-{tag}-{}.zip",
+            std::process::id()
+        ));
+        std::fs::write(&path, bytes).unwrap();
+        (Assets::open(&path).unwrap(), path)
+    }
+
+    /// A prefab of `n` bytes: the padding is white space, which a JSON parser skips
+    fn prefab(n: usize) -> Vec<u8> {
+        let mut doc = br#"{"version":8,"blocks":[{"x":0,"y":0,"z":0,"name":"A"}]"#.to_vec();
+        doc.resize(n - 1, b' ');
+        doc.push(b'}');
+        doc
+    }
+
+    #[test]
+    fn the_streaming_reader_stops_at_the_limit_whatever_the_entry_claims() {
+        // 8192 bytes come out of an entry that claims to hold one
+        let (a, path) = archive(&prefab(8192), 1, "over");
+        assert_eq!(a.size("Server/Prefabs/a.prefab.json"), Some(1));
+        let mut seen = 0u64;
+        let err = a
+            .with_reader_limited("Server/Prefabs/a.prefab.json", 1024, |r| {
+                let mut buf = [0u8; 300];
+                loop {
+                    match r.read(&mut buf) {
+                        Ok(0) => return Ok(()),
+                        Ok(n) => seen += n as u64,
+                        Err(e) => return Err(e.into()),
+                    }
+                }
+            })
+            .unwrap_err();
+        assert!(
+            format!("{err:#}").contains("expands beyond 1024 bytes"),
+            "{err:#}"
+        );
+        // nothing past the limit was handed over, and the reader stays failed
+        assert_eq!(seen, 1024);
+        // the prefab parser gets the same error instead of a document cut short
+        struct Nop;
+        impl crate::prefab::Visit for Nop {}
+        let err = a
+            .with_reader_limited("Server/Prefabs/a.prefab.json", 1024, |r| {
+                crate::prefab::stream(r, &mut Nop)
+            })
+            .unwrap_err();
+        assert!(format!("{err:#}").contains("expands beyond"), "{err:#}");
+        drop(a);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn an_entry_of_exactly_the_limit_streams_whole() {
+        let doc = prefab(8192);
+        let (a, path) = archive(&doc, 8192, "exact");
+        let name = "Server/Prefabs/a.prefab.json";
+        let read_all = |limit| {
+            a.with_reader_limited(name, limit, |r| {
+                let mut out = Vec::new();
+                r.read_to_end(&mut out)?;
+                Ok(out)
+            })
+        };
+        assert_eq!(read_all(8192).unwrap(), doc);
+        assert_eq!(read_all(READ_LIMIT).unwrap(), doc);
+        assert!(read_all(8191).is_err());
+        // and it parses through the public entry point as before
+        struct Count(u64);
+        impl crate::prefab::Visit for Count {
+            fn block(&mut self, _b: &crate::prefab::PrefabBlock) {
+                self.0 += 1;
+            }
+        }
+        let mut c = Count(0);
+        a.with_reader(name, |r| crate::prefab::stream(r, &mut c))
+            .unwrap();
+        assert_eq!(c.0, 1);
+        drop(a);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn an_entry_that_claims_more_than_the_limit_is_refused_before_it_is_read() {
+        let (a, path) = archive(&prefab(64), 2000, "claim");
+        let mut called = false;
+        let err = a
+            .with_reader_limited("Server/Prefabs/a.prefab.json", 1024, |_| {
+                called = true;
+                Ok(())
+            })
+            .unwrap_err();
+        assert!(!called);
+        assert!(format!("{err:#}").contains("too big to read"), "{err:#}");
+        drop(a);
+        std::fs::remove_file(path).unwrap();
     }
 }
