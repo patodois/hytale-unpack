@@ -241,12 +241,18 @@ pub fn decode_png(bytes: &[u8]) -> Result<Rgba> {
 /// The data does not describe this mapping. It is inferred from the files (a ramp to index by
 /// brightness) and was checked by eye against three of the game's own generated icons; see the
 /// README.
+///
+/// A gradient with no texels, or whose `data` is shorter than the row its `width` declares (the
+/// fields are public, so the two can disagree), tints nothing.
 pub fn tint(texture: &Rgba, gradient: &Rgba) -> Rgba {
     let mut out = texture.clone();
     if gradient.width == 0 || gradient.height == 0 {
         return out;
     }
     let last = (gradient.width - 1) as usize;
+    if gradient.data.len() / 4 <= last {
+        return out;
+    }
     for px in out.data.as_chunks_mut::<4>().0 {
         if px[0] != px[1] || px[1] != px[2] {
             continue;
@@ -325,6 +331,33 @@ mod tests {
         let t = tint(&tex, &grad);
         assert_eq!(&t.data[0..3], &[1, 2, 3]);
         assert_eq!(&t.data[4..7], &[9, 8, 7]);
+    }
+
+    /// Found by review: `tint` indexed the gradient by its declared width and panicked when the
+    /// data was shorter. `Rgba`'s fields are public, so a caller can build such a value.
+    #[test]
+    fn a_gradient_with_less_data_than_its_width_declares_tints_nothing() {
+        let tex = Rgba {
+            width: 2,
+            height: 1,
+            data: vec![0, 0, 0, 255, 255, 255, 255, 255],
+        };
+        let short = Rgba {
+            width: 256,
+            height: 1,
+            data: vec![9, 9, 9, 255],
+        };
+        assert_eq!(tint(&tex, &short), tex);
+        let empty = Rgba {
+            width: 256,
+            height: 16,
+            data: vec![],
+        };
+        assert_eq!(tint(&tex, &empty), tex);
+        // a whole first row is enough, as it always was: only row 0 is read
+        let mut row = ramp();
+        row.height = 16;
+        assert_eq!(&tint(&tex, &row).data[4..7], &[255, 0, 0]);
     }
 
     /// CRC-32 of the PNG specification (section 5.5), bit by bit

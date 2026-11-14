@@ -214,10 +214,11 @@ pub fn stem(path: &str) -> &str {
 ///
 /// A set may list the same file more than once and tell the entries apart only by their `Speed`
 /// (Bat: `Fly` is `Fly.blockyanim` at the default speed, at 1.25 and at 1.5). Those clips have the
-/// same name by the rule above, so each entry past the first of its name that carries a speed
-/// other than 1 gets `@speed` appended (`Fly/Fly`, `Fly/Fly@1.25`, `Fly/Fly@1.5`). Entries that
-/// are still equal after that (same file, same speed) are numbered `#2`, `#3`: the data has
-/// nothing else to tell them apart.
+/// same name by the rule above, so every entry of a name that occurs more than once, the first
+/// one included, gets `@speed` appended when it carries a speed other than 1 (`Fly/Fly`,
+/// `Fly/Fly@1.25`, `Fly/Fly@1.5`; had the 1.25 entry come first, it would still be
+/// `Fly/Fly@1.25`). Entries that are still equal after that (same file, same speed) are numbered
+/// `#2`, `#3`: the data has nothing else to tell them apart.
 fn clip_names(set: &str, refs: &[AnimRef]) -> Vec<String> {
     if refs.len() == 1 {
         return vec![set.to_string()];
@@ -582,13 +583,19 @@ impl Hytale {
             .defs
             .gradient_sets(&self.assets)
             .texture(gradient)
-            .ok_or_else(|| {
-                format!(
+            .ok_or_else(|| match self.defs.gradient_sets_error(&self.assets) {
+                // no gradient can be found in a file that did not read: say that, not that this
+                // one is missing from it
+                Some(why) => format!(
+                    "{} could not be read: {why}",
+                    crate::defs::GRADIENT_SETS_PATH
+                ),
+                None => format!(
                     "gradient {}/{} is not in {}",
                     gradient.set,
                     gradient.id,
                     crate::defs::GRADIENT_SETS_PATH
-                )
+                ),
             })?;
         let g = self
             .texture(&Assets::common(path))
@@ -1191,6 +1198,16 @@ mod tests {
             clip_names("Fly", &refs),
             ["Fly/Fly", "Fly/Fly@1.25", "Fly/Fly@1.5", "Fly/Fly_Glide"]
         );
+    }
+
+    #[test]
+    fn a_repeated_file_takes_its_speed_into_the_name_wherever_it_stands() {
+        // the first entry of a repeated name is named by its speed like the later ones
+        let refs = [
+            r("A/Fly.blockyanim", Some(1.25)),
+            r("A/Fly.blockyanim", None),
+        ];
+        assert_eq!(clip_names("Fly", &refs), ["Fly/Fly@1.25", "Fly/Fly"]);
     }
 
     #[test]

@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use anyhow::{anyhow, bail, Context, Result};
 use zip::{CompressionMethod, ZipArchive};
@@ -143,6 +143,14 @@ impl Assets {
             .or_else(|| self.folded.get(&name.to_ascii_lowercase()).copied())
     }
 
+    /// The archive, locked for one read. A panic in a [`Assets::with_reader`] callback poisons
+    /// the lock; that must not make every later read panic too, and it need not: a read opens
+    /// its entry by index and seeks to it, so nothing of an interrupted read is left to go on
+    /// from.
+    fn archive(&self) -> MutexGuard<'_, ZipArchive<File>> {
+        self.zip.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// The bytes of one entry.
     pub fn read(&self, name: &str) -> Result<Vec<u8>> {
         self.read_limited(name, READ_LIMIT)
@@ -155,7 +163,7 @@ impl Assets {
         if self.sizes[i] > limit {
             bail!("{name}: {} bytes is too big to read at once", self.sizes[i]);
         }
-        let mut zip = self.zip.lock().unwrap();
+        let mut zip = self.archive();
         let f = zip.by_index(i).with_context(|| format!("opening {name}"))?;
         // The sizes in the headers are only claims. The stored bytes of an entry cannot be more
         // than the file holds after the start of its data, and a DEFLATE stream expands by at
@@ -208,7 +216,7 @@ impl Assets {
         if self.sizes[i] > limit {
             bail!("{name}: {} bytes is too big to read", self.sizes[i]);
         }
-        let mut zip = self.zip.lock().unwrap();
+        let mut zip = self.archive();
         let file = zip.by_index(i).with_context(|| format!("opening {name}"))?;
         let mut bounded = Bounded {
             inner: file,
@@ -422,6 +430,54 @@ mod streaming_read_limit {
             .unwrap_err();
         assert!(!called);
         assert!(format!("{err:#}").contains("too big to read"), "{err:#}");
+        drop(a);
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod after_a_panic {
+    use super::*;
+    use std::io::Write;
+
+    /// Found by review: a panic inside a `with_reader` callback poisoned the archive's lock, and
+    /// every read after it panicked as well.
+    #[test]
+    fn a_panic_in_a_streaming_callback_does_not_break_later_reads() {
+        let first: Vec<u8> = (0..20_000u32).map(|i| (i % 251) as u8).collect();
+        let second = b"second entry".to_vec();
+        let path = std::env::temp_dir().join(format!("hytale-poison-{}.zip", std::process::id()));
+        let mut zip = zip::ZipWriter::new(File::create(&path).unwrap());
+        for (name, bytes, method) in [
+            ("Common/first", &first, CompressionMethod::Deflated),
+            ("Common/second", &second, CompressionMethod::Stored),
+        ] {
+            let opts = zip::write::SimpleFileOptions::default().compression_method(method);
+            zip.start_file(name, opts).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+        zip.finish().unwrap();
+        let a = Assets::open(&path).unwrap();
+        // the callback reads part of the entry and panics with the archive locked
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            a.with_reader("Common/first", |r| -> Result<()> {
+                let mut part = [0u8; 100];
+                r.read_exact(&mut part)?;
+                panic!("a callback that panics");
+            })
+        }));
+        assert!(panicked.is_err());
+        // both ways of reading still work, from the start of each entry
+        assert_eq!(a.read("Common/first").unwrap(), first);
+        assert_eq!(a.read("Common/second").unwrap(), second);
+        let streamed = a
+            .with_reader("Common/first", |r| {
+                let mut out = Vec::new();
+                r.read_to_end(&mut out)?;
+                Ok(out)
+            })
+            .unwrap();
+        assert_eq!(streamed, first);
         drop(a);
         std::fs::remove_file(path).unwrap();
     }

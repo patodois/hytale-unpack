@@ -199,6 +199,16 @@ fn main() -> Result<()> {
     }
 }
 
+/// The last line of `check` and `check-bridge`. [`check::peak_rss`] is 0 where the peak is not
+/// measured (anything but Unix): the figure is then left out, not printed as "0.0 MB".
+fn memory_and_time(peak_rss: u64, seconds: f64) -> String {
+    if peak_rss == 0 {
+        format!("{seconds:.1} s (peak RSS is not measured on this system)")
+    } else {
+        format!("peak RSS {:.1} MB, {seconds:.1} s", peak_rss as f64 / 1e6)
+    }
+}
+
 fn cmd_check(path: &std::path::Path) -> Result<()> {
     let assets = Assets::open(path)?;
     let report = check::run(&assets, |name, done, total| {
@@ -233,11 +243,7 @@ fn cmd_check(path: &std::path::Path) -> Result<()> {
     for n in &report.notes {
         println!("note {n}");
     }
-    println!(
-        "peak RSS {:.1} MB, {:.1} s",
-        report.peak_rss as f64 / 1e6,
-        report.seconds
-    );
+    println!("{}", memory_and_time(report.peak_rss, report.seconds));
     let failed = report.models.failed + report.anims.failed + report.prefabs.failed;
     if failed > 0 {
         bail!("{failed} entries failed");
@@ -402,7 +408,10 @@ fn cmd_prefab(assets: &Assets, id: &str, entities: usize, top: usize) -> Result<
     if names.len() > top {
         println!("  ... and {} more names", names.len() - top);
     }
-    for (n, c) in &s.fluids {
+    // a hash map has no order of its own: most cells first, then by name, like the block names
+    let mut fluids: Vec<_> = s.fluids.iter().collect();
+    fluids.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+    for (n, c) in fluids {
         println!("  fluid {n}: {c} cells");
     }
     for e in &s.ents {
@@ -861,9 +870,8 @@ fn cmd_check_bridge(hy: &hytale_unpack::bridge::Hytale, scenes: Option<f64>) -> 
     }
     let _ = Provider::game(hy);
     println!(
-        "peak RSS {:.1} MB, {:.1} s",
-        check::peak_rss() as f64 / 1e6,
-        start.elapsed().as_secs_f64()
+        "{}",
+        memory_and_time(check::peak_rss(), start.elapsed().as_secs_f64())
     );
     // like `check`: a script can rely on the status
     let failed: u64 = failed.iter().sum();
@@ -871,4 +879,22 @@ fn cmd_check_bridge(hy: &hytale_unpack::bridge::Hytale, scenes: Option<f64>) -> 
         bail!("{failed} assets failed");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Found by review: on Windows, where the peak is not measured, `check` printed "peak RSS
+    /// 0.0 MB"
+    #[test]
+    fn a_peak_that_was_not_measured_is_left_out_not_printed_as_zero() {
+        assert_eq!(memory_and_time(88_100_000, 5.04), "peak RSS 88.1 MB, 5.0 s");
+        let unmeasured = memory_and_time(0, 5.04);
+        assert!(!unmeasured.contains("0.0 MB"), "{unmeasured}");
+        assert!(unmeasured.starts_with("5.0 s"), "{unmeasured}");
+        // where it is measured, a running process has a peak
+        #[cfg(unix)]
+        assert!(check::peak_rss() > 0);
+    }
 }

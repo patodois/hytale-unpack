@@ -140,7 +140,8 @@ pub struct Defs {
     models: HashMap<String, String>,
     items: HashMap<String, String>,
     cache: Mutex<HashMap<(Family, String), Arc<Value>>>,
-    gradients: OnceLock<GradientSets>,
+    /// The gradient sets, and why they could not be read when they could not
+    gradients: OnceLock<(GradientSets, Option<String>)>,
 }
 
 fn stem(path: &str) -> &str {
@@ -179,18 +180,32 @@ impl Defs {
         }
     }
 
-    /// The character creator's gradient sets, read on first use (empty when the file is missing).
-    pub fn gradient_sets(&self, assets: &Assets) -> &GradientSets {
-        self.gradients.get_or_init(|| {
-            assets
-                .read_json::<Value>(GRADIENT_SETS_PATH)
-                .map(|v| GradientSets::from_json(&v))
-                .unwrap_or_default()
-        })
+    fn gradients(&self, assets: &Assets) -> &(GradientSets, Option<String>) {
+        self.gradients
+            .get_or_init(|| match assets.read_json::<Value>(GRADIENT_SETS_PATH) {
+                Ok(v) => (GradientSets::from_json(&v), None),
+                Err(e) => (GradientSets::default(), Some(format!("{e:#}"))),
+            })
     }
 
+    /// The character creator's gradient sets, read on first use. Empty when the file is missing
+    /// or cannot be read or parsed; [`Defs::gradient_sets_error`] tells that apart from a file
+    /// that lists no gradient.
+    pub fn gradient_sets(&self, assets: &Assets) -> &GradientSets {
+        &self.gradients(assets).0
+    }
+
+    /// Why [`Defs::gradient_sets`] is empty, when that is because `GradientSets.json` is not in
+    /// the archive or could not be read or parsed
+    pub fn gradient_sets_error(&self, assets: &Assets) -> Option<&str> {
+        self.gradients(assets).1.as_deref()
+    }
+
+    /// The paths of every entity model definition, sorted
     pub fn model_paths(&self) -> impl Iterator<Item = &str> {
-        self.models.values().map(|s| s.as_str())
+        let mut paths: Vec<&str> = self.models.values().map(|s| s.as_str()).collect();
+        paths.sort_unstable();
+        paths.into_iter()
     }
 
     pub fn item_path(&self, id: &str) -> Option<&str> {

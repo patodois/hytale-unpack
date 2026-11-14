@@ -569,3 +569,133 @@ fn check_bridge_exits_with_1_when_a_model_fails_and_with_0_when_all_load() {
         "{stdout}"
     );
 }
+
+// ---- smaller findings of the review ----
+
+/// Found by review: a `GradientSets.json` that cannot be read or parsed was swallowed, and every
+/// tint then failed with "gradient ... is not in GradientSets.json", which is not what happened.
+#[test]
+fn a_broken_gradient_sets_file_is_named_as_the_reason_a_tint_is_not_applied() {
+    let mut files: Vec<(String, Vec<u8>)> = base_files()
+        .into_iter()
+        .filter(|(n, _)| !n.ends_with("GradientSets.json"))
+        .collect();
+    files.push((
+        "Cosmetics/CharacterCreator/GradientSets.json".into(),
+        br#"[{"Id":"Hair","Gradients":{"Brown":"#.to_vec(),
+    ));
+    model(
+        &mut files,
+        "Tinted",
+        r#"{"Model":"Body.blockymodel","Texture":"Body.png","GradientSet":"Hair","GradientId":"Brown",
+            "DefaultAttachments":[
+              {"Model":"Hat.blockymodel","Texture":"Hat.png","GradientSet":"Hair","GradientId":"Brown"}]}"#,
+    );
+    let fake = archive(&files);
+    // the model still loads, untinted, and both reports say why
+    let (am, report) = fake.hy.load_animated_report(&path("Tinted")).unwrap();
+    am.validate().unwrap();
+    assert_eq!(report.tint, None);
+    let why = report.tint_not_applied.unwrap();
+    assert!(
+        why.starts_with(
+            "Hair/Brown: Cosmetics/CharacterCreator/GradientSets.json could not be read: "
+        ),
+        "{why}"
+    );
+    assert!(why.contains("EOF while parsing"), "{why}");
+    assert!(!why.contains("is not in"), "{why}");
+    let hat = report.attachments[0].tint_not_applied.as_ref().unwrap();
+    assert!(hat.contains("could not be read"), "{hat}");
+    // the sets are empty, as they are for an archive without the file, and the error is there
+    // to ask for
+    let defs = fake.hy.defs();
+    assert!(defs.gradient_sets(fake.hy.assets()).is_empty());
+    assert!(defs.gradient_sets_error(fake.hy.assets()).is_some());
+    // a file that reads has no error
+    let good = archive(&base_files());
+    assert!(good
+        .hy
+        .defs()
+        .gradient_sets_error(good.hy.assets())
+        .is_none());
+    assert_eq!(good.hy.defs().gradient_sets(good.hy.assets()).len(), 1);
+}
+
+/// Found by review: `Defs::model_paths` handed out the values of a hash map, in an order that
+/// differs from run to run (the `assets_zip` fuzz target tests the first 16).
+#[test]
+fn model_paths_come_in_a_fixed_order() {
+    let mut files = base_files();
+    for i in 0..40 {
+        model(
+            &mut files,
+            &format!("Folder{}/Model_{:02}", i % 3, (i * 7) % 40),
+            r#"{"Model":"Body.blockymodel"}"#,
+        );
+    }
+    let fake = archive(&files);
+    let paths: Vec<&str> = fake.hy.defs().model_paths().collect();
+    assert_eq!(paths.len(), 40);
+    let mut sorted = paths.clone();
+    sorted.sort();
+    assert_eq!(paths, sorted);
+}
+
+/// Found by review: `prefab` printed its fluid lines in the order of a hash map, different from
+/// run to run. They come like the block names: most cells first, then by name.
+#[test]
+fn prefab_prints_its_fluids_in_a_fixed_order() {
+    let names = [
+        ("Water_Source", 3),
+        ("Lava", 1),
+        ("Water", 3),
+        ("Mud", 2),
+        ("Acid", 1),
+        ("Tar", 5),
+        ("Slime", 1),
+        ("Poison", 2),
+    ];
+    let mut fluids = Vec::new();
+    for (name, cells) in names {
+        for i in 0..cells {
+            fluids.push(format!(
+                r#"{{"x":{i},"y":0,"z":0,"name":"{name}","level":1}}"#
+            ));
+        }
+    }
+    let fake = archive(&[(
+        "Server/Prefabs/Pond.prefab.json".into(),
+        format!(
+            r#"{{"version":8,"blocks":[],"fluids":[{}]}}"#,
+            fluids.join(",")
+        )
+        .into_bytes(),
+    )]);
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_hytale-unpack"))
+        .arg("--assets")
+        .arg(&fake.path)
+        .args(["prefab", "Pond"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let lines: Vec<&str> = stdout
+        .lines()
+        .filter(|l| l.trim_start().starts_with("fluid "))
+        .map(str::trim)
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            "fluid Tar: 5 cells",
+            "fluid Water: 3 cells",
+            "fluid Water_Source: 3 cells",
+            "fluid Mud: 2 cells",
+            "fluid Poison: 2 cells",
+            "fluid Acid: 1 cells",
+            "fluid Lava: 1 cells",
+            "fluid Slime: 1 cells",
+        ]
+    );
+}

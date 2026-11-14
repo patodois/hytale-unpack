@@ -537,6 +537,15 @@ skipped (0), the channels trimmed (2) and the channels left out of a kept clip (
   `unresolved` are blocks the game does not draw. `Defs::names_item` is new as well.
 - A scene load parses its prefab once. It used to parse it twice, the first time only for the anchor, which a
   document may write after its blocks. The scene and its report are the same.
+- `prefab` prints its fluid lines in a fixed order (most cells first, then by name) and `Defs::model_paths` returns
+  the paths sorted; both came in the order of a hash map, different from run to run.
+- A `GradientSets.json` that cannot be read or parsed is named as the reason a tint is not applied
+  (`... could not be read: ...`); the reports used to say that the gradient "is not in" the file.
+  `Defs::gradient_sets_error` is new.
+- `check` and `check-bridge` leave the peak RSS out of their last line where it is not measured (Windows), instead
+  of printing "peak RSS 0.0 MB".
+- `image::tint` returns the texture untinted for a gradient whose data is shorter than its width declares, and a
+  panic in a callback of `Assets::with_reader` no longer makes every later read of the archive panic.
 
 ## Changes in 0.4.0
 
