@@ -8,7 +8,13 @@
 //! which case `Server/Item/Items` wins). The child inherits everything: objects are merged key by
 //! key, recursively, and any other value (strings, numbers, arrays) is replaced by the child's.
 //! For example `Server/Models/Intelligent/Trork/Trork.json` has `"Parent": "Player"` and so gets
-//! the player's animation sets; 243 of 438 model definitions have a parent.
+//! the player's animation sets; 243 of 438 model definitions had a parent in the archive of
+//! October 2026 (not counted again for game version 0.7.5).
+//!
+//! Known limitation: one path is kept per file name, for items and for entity models alike. A
+//! block is looked up by the file name of its item, also when it was asked for by its full path,
+//! so two item files of the same name load the same block: the one under `Server/Item/Items`,
+//! else the first in archive order. See "What is left out" in the README.
 //!
 //! # Entity models (`Server/Models/**.json`)
 //!
@@ -32,8 +38,9 @@
 //!
 //! `DefaultAttachments` lists the models worn by every instance of the entity (eyes, hair, armour,
 //! weapons, hats), each with its own texture. A model's `Parent` chain replaces the whole list, as
-//! it does for any array: 226 of the 436 entity models list at least one attachment with a model
-//! after inheritance (778 entries).
+//! it does for any array: in the archive of October 2026, 226 of the 436 entity models listed at
+//! least one attachment with a model after inheritance (778 entries); game version 0.7.5 has 502
+//! entity models, and its entries were not counted.
 //! `RandomAttachmentSets` names sets of alternatives (`"Fleece": {"Wool": {...}}`, an option `{}`
 //! meaning none) of which one is picked per instance; the data gives no pick, so they are only
 //! read, never composed. An entry with a `Weight` (a probability or a share) is in the same

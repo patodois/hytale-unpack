@@ -39,8 +39,13 @@ Each archive holds the program, this README, both license files and an `INSTALL.
 the checksum of every archive (`shasum -a 256 -c SHA256SUMS` on macOS, `sha256sum -c SHA256SUMS` on Linux,
 `Get-FileHash` on Windows). They are built with the `bridge` feature (the default), so the rewrite-bridge provider and the glTF export are included.
 
-`SHA256SUMS.sig` on the same release signs `SHA256SUMS` with the project's Ed25519 release key, so you can also check
-that the list itself came from here. With the downloads in one folder (needs OpenSSL 3):
+The release workflow ([`.github/workflows/release.yml`](.github/workflows/release.yml)) builds the four archives and
+`SHA256SUMS` and attaches them to the release; it signs nothing. `SHA256SUMS.sig` is not made by it: the maintainer
+signs `SHA256SUMS` with the project's Ed25519 release key outside the workflow and adds the signature to the release
+afterwards, so that you can also check that the list itself came from here. Every release up to v0.4.0 has the
+file; a release that has just been published may not have it yet, and then only the checksums can be checked. The
+script that verifies it is [`tools/verify-release.sh`](tools/verify-release.sh) in this repository; it is not in the
+archives. From a checkout, with the downloads in one folder (needs OpenSSL 3):
 
 ```sh
 sh tools/verify-release.sh hytale-unpack v0.4.0 path/to/folder
@@ -170,14 +175,18 @@ install exists, and skip otherwise.
 
 `~/Library/Application Support/Hytale/install/release/package/game/latest/`, 4.6 GB: `Assets.zip`,
 `Client/`, `Server/` (including `HytaleServer.jar`, which this crate does not touch). The numbers in this file are from
-game version 0.7.5 (build `4f7cd77ad`), as it was installed on 2026-11-05.
+game version 0.7.5 (build `4f7cd77ad`), as it was installed on 2026-11-05, except where a passage says that it is
+from the earlier archive (the install of October 2026): the timings under [Build and use](#build-and-use) and some
+breakdowns under [Attachments](#attachments).
 
 Every `Assets.zip` entry is *stored* (method 0), so reading an entry is a seek and a copy. Entries are flat
 paths: `Common/` (what the client needs: `Blocks`, `Characters`, `Cosmetics`, `Items`, `NPC`, `Icons`, `Sounds`,
 textures), `Server/` (JSON game data: `Models`, `Item`, `NPC`, `Prefabs`, `World`, `Particles`, `Audio`, ...) and
 `Cosmetics/`. By extension: 36,538 `.json`, 11,854 `.png`, 6,247 `.ogg`, 3,201 `.blockymodel`, 7,123
 `.blockyanim`, 2,534 `.particlespawner`, 820 `.particlesystem`. `Server/Prefabs` holds 9,285 JSON files:
-9,282 prefabs, one `BranchInfo.json` and two stray copies named like `Windmills_002.prefab (1).json`, which are not read as prefabs.
+9,282 prefabs, one `BranchInfo.json` and two stray copies named like `Windmills_002.prefab (1).json`. `list`, `check`
+and `check-bridge` take only `*.prefab.json` as prefabs, so those three are not listed or checked; `load_scene` and
+`prefab <path>` read any `.json` under `Server/Prefabs/` that is named to them.
 
 ## Formats as decoded
 
@@ -299,6 +308,14 @@ let house = hy.load_scene("Server/Prefabs/Npc/Kweebec/Autumn/Houses_Small/Kweebe
 What the game's data says, what this crate does with it, and where each rule comes from (a model such as the
 player's face, an armour or the tusks of a Trork are separate `.blockymodel` files).
 
+**Which game version the counts are from.** The counts in this section that are also under [Numbers](#numbers) or
+asserted in `tests/game_data.rs` are those of game version 0.7.5: the models that wear attachments, the attachments
+and pieces, the random sets, the entries that add nothing, the models with a gradient, the nodes that repeat a
+name, the eight half pairs. The comparison with the icons and every breakdown that says "earlier archive" were
+made on the install of October 2026 and have not been taken again. The smaller counts that say neither (texels,
+gradient files, pieces on bare pivots, cosmetic parts) were written for that install too, and nothing records that
+they were taken again. `check-bridge` prints most of the tallies, so a run on the current install renews them.
+
 **The reference tool.** Where the data is silent, the rules below follow the Blockbench plugin's source
 ([JannisX11/hytale-blockbench-plugin](https://github.com/JannisX11/hytale-blockbench-plugin), version 0.11.0, commit
 `485397c`, 2026-10-09: `src/blockymodel.ts`, `src/attachments.ts`). Its repository is a personal one of the author of
@@ -323,15 +340,15 @@ are game content and are not in this repository.
 | A piece (`isPiece: true`) goes onto the first node of the same name, at any depth of the attachment's tree, among the nodes that exist before it (the body, then earlier attachments) | plugin (`existing_groups.find`, and a tooltip saying that a piece attaches to the node with the same name) | **confirmed**: worn vs bare body, IoU better in 89 of 99 models and worse in 8, mean 0.577 to 0.658, colour error lower in 69 and higher in 30 |
 | The piece's children hang from that node, at their own position plus that node's shape offset (the rule for any parent) | plugin, and the crate's general hierarchy rule | **confirmed together with the rule above**: the alternative that keeps the pieces as ordinary nodes at their own place scores worse (mean IoU 0.602; better in 77 models, worse in 20, colour error 87 to 12) |
 | The piece's own position is not used | the data: the face quad of `Player_Face_Detached` is authored 20 px below a `Head` piece at y 79, the body's head pivot is at 87, and it lands on the head box's front only on the body's node | **confirmed** by the same comparison |
-| The piece's own orientation and shape offset are not used | plugin only (its code zeroes the rotation of a piece and the offset of its children, and a comment there saying the rotation matters for the model on its own but not once attached). of the 1,888 pieces merged, 429 are rotated and 560 have an offset of their own (of all 2,059 pieces in the entries that are worn or tried, 439 are rotated) | **not confirmed**: on the 56 models with rotated pieces that have children, the best of five cameras gives mean IoU 0.758 ignoring the rotation and 0.761 applying it (better in 19, worse in 28; colour error lower in 34, higher in 16): the icons cannot tell the two apart. Kept because the plugin says so; this is the one rule resting on the plugin alone |
+| The piece's own orientation and shape offset are not used | plugin only (its code zeroes the rotation of a piece and the offset of its children, and a comment there saying the rotation matters for the model on its own but not once attached). in the earlier archive, of the 1,888 pieces merged, 429 were rotated and 560 had an offset of their own (of all 2,059 pieces in the entries that are worn or tried, 439 were rotated); 0.7.5 merges 2,034 pieces | **not confirmed**: on the 56 models with rotated pieces that have children, the best of five cameras gives mean IoU 0.758 ignoring the rotation and 0.761 applying it (better in 19, worse in 28; colour error lower in 34, higher in 16): the icons cannot tell the two apart. Kept because the plugin says so; this is the one rule resting on the plugin alone |
 | A non-piece node is added as it is; a root keeps its own position and orientation | plugin | not tested (12 such roots in the data) |
 | A piece with no node of that name, and what hangs below it, is left out | the data says no more; the plugin shows a loose group | not applicable |
 | A piece whose node is a bare pivot (shape type `none`) with a non-zero shape offset, and what hangs below it, is **left out** | the plugin takes the body's shape offset only when the node has a box or quad, this crate's general rule takes it always, and nothing decides: 18 pieces (the ear anchors of `Zombie`, `Zombie_Aberrant`, `Zombie_Aberrant_Small`, `Zombie_Burnt`, `Zombie_Frost` and `Zombie_Sand`; the eyebrow anchors of `Feran` and `Feran_Civilian`; `R-Thigh` of `Zombie_Aberrant_Small`'s `Shorty_Slim` and `Bone`) | the icon of the Zombie did not settle it |
 
 - **Which models.** An entity definition (`Server/Models/**.json`, with `Parent` inheritance: a child's list replaces
-  its parent's) has `DefaultAttachments`, a list of `{Model, Texture, GradientSet?, GradientId?, Weight?}`. 226 of the
-  436 entity models list 778 entries: eyes, hair, armour, hats, weapons, back items. The player has five (face, ears,
-  mouth, eyes, eyebrows).
+  its parent's) has `DefaultAttachments`, a list of `{Model, Texture, GradientSet?, GradientId?, Weight?}`: eyes, hair,
+  armour, hats, weapons, back items. In the earlier archive 226 of the 436 entity models listed 778 entries; 0.7.5
+  has 502 entity models, and its entries were not counted. The player has five (face, ears, mouth, eyes, eyebrows).
 - **Which texture.** Each entry names its own texture. An entry with `GradientSet` / `GradientId` is tinted: the set
   and id are looked up in `Cosmetics/CharacterCreator/GradientSets.json`, which gives a gradient PNG (a ramp from
   dark to light, 256 wide, 208 of the 212 files 16 rows high and 4 of them 13). **The mapping from texture to ramp is inferred, not stated by the data or the plugin** (the
@@ -362,34 +379,36 @@ are game content and are not in this repository.
   texture **only where the data pairs the two**, which is how every other record with a gradient is written (a
   cosmetic's `GreyscaleTexture` and `GradientSet`, an attachment's `Texture` and `GradientSet`, in one object): when
   `Texture`, `GradientSet` and `GradientId` all come from the same definition file. `Player.json` gives all three. The
-  gradient is also in 145 entity models, almost all by inheriting it from the player, and nothing in the data, the
+  gradient is in 164 entity models, almost all by inheriting it from the player, and nothing in the data, the
   plugin or the cosmetics files says which texture an inherited gradient tints: a child that gives its own `Texture`
   and does not restate the gradient breaks the pair. Result: 7 models are tinted (`Player`, `PlayerTestModel_G`,
-  `PlayerTestModel_V`, `Temple_Mithril_Guard`, `NPC_Santa`, `Boy_Trail`, `Warrior_Quest`) and 138 are not, with the
-  gradient reported in `LoadReport::tint_not_applied` and printed by `model`. Of those 138, 137 have a texture painted
-  in colour (the Trork, the skeletons, the Kweebecs...) and nothing to lose; **`NPC_Elf` is the one with a greyscale
+  `PlayerTestModel_V`, `Temple_Mithril_Guard`, `NPC_Santa`, `Boy_Trail`, `Warrior_Quest`) and 157 are not, with the
+  gradient reported in `LoadReport::tint_not_applied` and printed by `model`. In the earlier archive, where 138 were
+  not, 137 of them had a texture painted in colour (the Trork, the skeletons, the Kweebecs...) and nothing to lose;
+  the textures of the models added since were not looked at. **`NPC_Elf` is the one known to have a greyscale
   texture** (the player's, restated) and no restated gradient, so it stays grey. None of the 7 has an icon, so this
   rule is supported by the data's pairing only, not by the icons.
 - **Names that repeat.** An attachment's node can have the name of a node that is already there (the body's, or
-  an earlier attachment's): 528 nodes in 61 of the 179 models, listed in `AttachmentNote::name_collisions`. Nothing
+  an earlier attachment's): 682 nodes in 78 of the 196 models, listed in `AttachmentNote::name_collisions`. Nothing
   is renamed or merged, because neither the data nor the plugin defines what a repeated name means; a clip that
-  names it drives every node of that name, as it does for the names that repeat inside one model file. In 12 of the
-  61 models a clip does name such a node, so it moves both the body's and the attachment's (`check-bridge` counts
-  them).
-- **How many.** 179 of the 436 entity models wear at least one attachment (710 attachments, 1,888 `isPiece` nodes
+  names it drives every node of that name, as it does for the names that repeat inside one model file. Where a clip
+  does name such a node, it moves both the body's and the attachment's: 12 of the 61 models that had such nodes in
+  the earlier archive (`check-bridge` counts them).
+- **How many.** 196 of the 502 entity models wear at least one attachment (772 attachments, 2,034 `isPiece` nodes
   merged into body nodes). Each attachment brings its own material and image.
 - **Left out, and why** (all listed in `LoadReport::attachments_left_out`, which `model` prints):
-  - `RandomAttachmentSets`: 117 sets on 44 models ("one of Adult_Blue, Adult_Green, ... per instance", a weight
-    on most options, `{}` for none). The data does not pick one, so none is worn.
+  - `RandomAttachmentSets`: 219 sets ("one of Adult_Blue, Adult_Green, ... per instance", a weight on most
+    options, `{}` for none); the earlier archive had 117 sets on 44 models. The data does not pick one, so none is
+    worn.
   - the one `DefaultAttachments` entry with a `Weight` (`NPC_Santa`'s curly hair, 0.9): the data does not say what
     the weight means for a default.
-  - 67 entries that add nothing: 58 (weapons held by projectile stand-ins and showcase mannequins) whose only pieces
-    are `R-Attachment` (46), `Origin_Projectile` (11) or `L-Attachment` (1) with no node of that name in the body,
-    and 9 whose pieces sit on bare pivots with an offset (above). The plugin shows an unmatched piece as a loose
-    group; the data says no more.
-  - 24 more unmatched pieces inside worn attachments, all of them the two anchors of the optional ear accessories
-    (`R-Ear-EarAccessory`, `L-Ear-EarAccessory`) in `Ears1` on 12 models; they and what hangs below them are not
-    added.
+  - 72 entries that add nothing. The split was taken on the earlier archive, which had 67: 58 (weapons held by
+    projectile stand-ins and showcase mannequins) whose only pieces are `R-Attachment` (46), `Origin_Projectile` (11)
+    or `L-Attachment` (1) with no node of that name in the body, and 9 whose pieces sit on bare pivots with an
+    offset (above). The plugin shows an unmatched piece as a loose group; the data says no more.
+  - More unmatched pieces inside worn attachments: 24 in the earlier archive, all of them the two anchors of the
+    optional ear accessories (`R-Ear-EarAccessory`, `L-Ear-EarAccessory`) in `Ears1` on 12 models; they and what
+    hangs below them are not added.
   - The player's *chosen* hair, clothes, armour and capes (`Cosmetics/CharacterCreator/*.json`, 590 parts
     for the player to pick from) and equipped armour items: no data says who wears what, so nothing is composed.
     The parts load as bare models as before. The same goes for items held in a hand (`R-Attachment`), which have
@@ -491,9 +510,9 @@ skipped (0), the channels trimmed (2) and the channels left out of a kept clip (
 
 ## What is left out
 
-- **Some attachments** (the rest is composed, see [Attachments](#attachments)): `RandomAttachmentSets` (117 sets on 44
-  models) and the one weighted default entry, because the data gives no pick; entries that add nothing (67: held
-  weapons with no node to attach to, and pieces on bare pivots with a shape offset); the entity gradient of the 138
+- **Some attachments** (the rest is composed, see [Attachments](#attachments)): `RandomAttachmentSets` (219 sets) and
+  the one weighted default entry, because the data gives no pick; entries that add nothing (72: held
+  weapons with no node to attach to, and pieces on bare pivots with a shape offset); the entity gradient of the 157
   models whose texture the data does not pair with it; the cosmetics a player chooses and equipped armour, because no data says who
   wears what. Clips that animate the nodes of attachments that are not worn (`Hair-B`, `Cape1`, ...) are still
   reported as missing nodes.
@@ -513,6 +532,12 @@ skipped (0), the channels trimmed (2) and the channels left out of a kept clip (
   that were not checked against anything) and use the same
   right-handed sign; `bridge::ROTATION_SIGNS` flips them in one place if they prove wrong.
 - The meaning of `filler` offsets is not decoded; only "does not draw again" is used.
+- **Items with the same file name (known limitation).** A block is addressed by the file name of its item
+  (`Rock_Stone`), which is what prefab cells and `Parent` references give, and one path is kept per name: a file
+  under `Server/Item/Items/` wins, else the first in archive order. An item id (`Server/Item/**/X.json`) is reduced
+  to `X` before it is loaded, so two item files with the same name load the same block, the one that path belongs
+  to, and `list` decides whether either is drawable from that one's definition. In the CLI, `model <name>` takes an
+  item of that name before an entity model of that name. Nothing is done about it yet.
 - The server (`HytaleServer.jar`) is not touched.
 
 ## Changes after 0.4.0 (not yet released)
@@ -546,6 +571,11 @@ skipped (0), the channels trimmed (2) and the channels left out of a kept clip (
   of printing "peak RSS 0.0 MB".
 - `image::tint` returns the texture untinted for a gradient whose data is shorter than its width declares, and a
   panic in a callback of `Assets::with_reader` no longer makes every later read of the archive panic.
+- This file: the counts under [Attachments](#attachments) had stayed those of the earlier archive in places. They
+  now agree with [Numbers](#numbers) and `tests/game_data.rs`, and what was not counted again says so. The text on
+  `SHA256SUMS.sig` says who makes it (the release workflow does not).
+- The note `check` gives for a model of more than 255 nodes names the limit as the Blockbench plugin's, which is
+  where it comes from, not as the game's. No model of the install has that many (the largest has 239).
 
 ## Changes in 0.4.0
 

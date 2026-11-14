@@ -94,8 +94,8 @@
 //! - the piece itself disappears into that node: its own `position`, `orientation` and
 //!   `shape.offset` are not used. They are where the piece was modelled, and they do not agree
 //!   with the node it goes to (the face's `Head` piece is at y 79 px, the player's head pivot at
-//!   87); of the 1,888 pieces merged onto entities, 429 are rotated and 560 have an offset of their
-//!   own;
+//!   87); of the 1,888 pieces merged onto entities in the archive of October 2026, 429 were
+//!   rotated and 560 had an offset of their own (game version 0.7.5 merges 2,034, not split);
 //! - its children hang from that node, positioned like the children of any node, relative to its
 //!   pivot plus its shape offset. That is why a face quad authored 20 px below its `Head` piece
 //!   lands on the front of the head box: the head's offset (20 px) is added;
@@ -346,7 +346,7 @@ impl BlockyModel {
         let flat = self.flatten();
         if flat.len() > 255 {
             p.push(format!(
-                "{} nodes, more than the 255 Hytale displays",
+                "{} nodes, more than the 255 the Blockbench plugin allows",
                 flat.len()
             ));
         }

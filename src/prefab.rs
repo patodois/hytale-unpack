@@ -14,27 +14,30 @@
 //!   "fluids":   [ { "x":1, "y":1, "z":-4, "name":"Water_Source", "level":1 } ] }
 //! ```
 //!
-//! All files seen have `version` 8 and `blockIdVersion` 11. Block cells are integer
+//! All 9,282 prefabs have `version` 8; `blockIdVersion` is 11 in 9,276 of them and 8 in 6 (the
+//! header is read and reported, nothing depends on it). Block cells are integer
 //! coordinates, +Y up, in the prefab's own frame; `name` is an item id (a file stem under
 //! `Server/Item/Items`, see [`crate::defs`]).
 //!
 //! # `rotation`
 //!
-//! A small integer, absent for no rotation. In the 2.6 million blocks sampled it takes the values
-//! 1 to 11 and no others. The values fall into three groups of four, `0..=3`, `4..=7` and
-//! `8..=11`, so it reads as `yaw + 4 * pitch` with yaw and pitch in quarter turns (a roll would
-//! add `16 * roll`, which never occurs in the sample). That reading is an inference from the
-//! numbers, supported by what the data does with it: stalactites are always `8` (pitch 2, upside
-//! down), tree trunks lie along an axis with `4` and `5`, bookcases use `1..=3`. See
+//! A small integer, absent for no rotation. In the 2.6 million blocks first sampled it took the
+//! values 1 to 11 and no others. The values fall into three groups of four, `0..=3`, `4..=7` and
+//! `8..=11`, so it reads as `yaw + 4 * pitch` with yaw and pitch in quarter turns. That reading
+//! is an inference from the numbers, supported by what the data does with it: stalactites are
+//! always `8` (pitch 2, upside down), tree trunks lie along an axis with `4` and `5`, bookcases
+//! use `1..=3`. A roll adds `16 * roll`. The sample had none; over all prefabs of game version
+//! 0.7.5 `check` finds the values 1 to 19, 24 to 27, 32 to 35 and 48 to 51, so the values from 16
+//! up are read as carrying a roll, whose direction is not verified (see the README). See
 //! [`decode_rotation`] for the axes and signs this crate uses and how they were checked.
 //!
 //! # `filler`
 //!
 //! Present on cells that belong to a bigger block (doors, beds, wide furniture). Values such as
-//! `1`, `31`, `32`, `992`, `1024`, `31744` are packed small signed offsets, 5 bits per axis (x in
-//! the low bits, then y, then z), read as the offset towards the cell that carries the model.
-//! This crate only needs to know that a cell with a non-zero filler does not draw the model
-//! again.
+//! `1`, `31`, `32`, `992`, `1024`, `31744` look like packed small signed offsets, 5 bits per axis
+//! (x in the low bits, then y, then z), towards the cell that carries the model. That reading was
+//! not checked against anything and is not used: the value is not decoded. This crate only uses
+//! that a cell with a non-zero filler does not draw the model again.
 //!
 //! The reader streams: [`stream`] visits blocks one by one without holding the document, which
 //! is what keeps `check` at a few megabytes.
