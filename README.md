@@ -508,6 +508,14 @@ skipped (0), the channels trimmed (2) and the channels left out of a kept clip (
 - The streaming reader of `Assets::with_reader`, which `check` and `prefab` read prefabs through, is bounded like
   `Assets::read`: an entry that claims more than 256 MiB is refused, and a read fails once more than that has
   actually come out. It had no bound before. The biggest entry in the install is 24 MB.
+- `image::decode_png` refuses a PNG that would decode to more than 1 GiB of RGBA (16384 x 16384 pixels). Until now
+  the only bound was a ratio to the length of the file, which lets a file of a few megabytes decode to many
+  gigabytes. Every texture that a listed model, block or prefab uses is decoded in the full runs under
+  [Numbers](#numbers) and [Checking the provider](#checking-the-provider), whose whole process peaks at 460 and
+  490 MB, so none of them is near the limit; the sizes of the PNGs that no model refers to (which only a direct
+  call reaches) were not measured.
+- An interlaced PNG is decoded pass row by pass row and its frame is made once every row has been read, instead
+  of reserving and zero-filling the frame the header declares before any data is decoded. The texels are the same.
 
 ## Changes in 0.4.0
 

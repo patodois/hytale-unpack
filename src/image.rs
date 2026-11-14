@@ -3,6 +3,10 @@
 //! Hytale's textures are PNGs: 1,361 of 1,506 sampled are 8-bit RGBA, the rest 8-bit RGB or
 //! palette. Sizes are multiples of 32 px (the modelling guide's rule) and are read from the file,
 //! because UVs are in pixels of the texture the model is drawn with.
+//!
+//! [`decode_png`] does not trust the header for memory: the output a file may declare is bounded
+//! by what a file of its length can decode to and by an absolute ceiling of 1 GiB of RGBA, and
+//! the output grows with the rows that are really decoded, for interlaced images too.
 
 use std::io::Cursor;
 
@@ -73,6 +77,105 @@ fn zeroed(size: usize) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
+/// The most RGBA output [`decode_png`] produces, in bytes: 1 GiB, a 16384 x 16384 image.
+///
+/// The ratio of [`decodable_from`] alone lets a file of a few megabytes decode to many gigabytes
+/// (a single-colour image compresses that well), so there is an absolute ceiling too. It is set
+/// from what the game ships: a run that loads every model, block and prefab the provider lists,
+/// and so decodes every texture they use, peaks at 490 MB of memory for the whole process (see
+/// "Numbers" and "Checking the provider" in the README), and the ceiling is more than twice
+/// that for one image.
+const MAX_DECODED_BYTES: u64 = 1 << 30;
+
+/// The seven passes of Adam7 interlacing (PNG specification, section 8.2): the first column and
+/// the first row of each pass, and its step in x and in y
+const ADAM7: [(u32, u32, u32, u32); 7] = [
+    (0, 0, 8, 8),
+    (4, 0, 8, 8),
+    (0, 4, 4, 8),
+    (2, 0, 4, 4),
+    (0, 2, 2, 4),
+    (1, 0, 2, 2),
+    (0, 1, 1, 2),
+];
+
+/// How many of `len` columns (or rows) a pass holds that starts at `first` and takes every
+/// `step`-th
+fn pass_len(len: u32, first: u32, step: u32) -> u32 {
+    if len > first {
+        (len - first).div_ceil(step)
+    } else {
+        0
+    }
+}
+
+/// One texel of a decoded row as RGBA
+type ToRgba = fn(&[u8]) -> [u8; 4];
+
+/// Bytes per texel of a decoded row, and the texel as RGBA
+fn texel(color: png::ColorType) -> Result<(usize, ToRgba)> {
+    Ok(match color {
+        png::ColorType::Rgba => (4, |p| [p[0], p[1], p[2], p[3]]),
+        png::ColorType::Rgb => (3, |p| [p[0], p[1], p[2], 255]),
+        png::ColorType::Grayscale => (1, |p| [p[0], p[0], p[0], 255]),
+        png::ColorType::GrayscaleAlpha => (2, |p| [p[0], p[0], p[0], p[1]]),
+        png::ColorType::Indexed => bail!("palette PNG was not expanded"),
+    })
+}
+
+/// The RGBA frame of an interlaced image of `w` x `h` texels.
+///
+/// The passes fill the frame in turn, so the frame has to exist before the last pass is read.
+/// It is not taken from the header, though: the rows are kept as they are decoded, pass after
+/// pass, so the memory used grows with rows that really exist, and the frame is made once every
+/// row has been read. A file that declares a big frame and then has no data for it costs what
+/// its data decodes to, not the frame.
+fn read_interlaced<R: std::io::BufRead + std::io::Seek>(
+    reader: &mut png::Reader<R>,
+    w: u32,
+    h: u32,
+    color: png::ColorType,
+) -> Result<Vec<u8>> {
+    let (n, rgba) = texel(color)?;
+    let mut passes: Vec<u8> = Vec::new();
+    for (x0, y0, dx, dy) in ADAM7 {
+        let (pw, ph) = (pass_len(w, x0, dx), pass_len(h, y0, dy));
+        if pw == 0 {
+            continue;
+        }
+        for _ in 0..ph {
+            let row = reader
+                .next_row()?
+                .ok_or_else(|| anyhow::anyhow!("interlaced PNG ends before its last row"))?;
+            if row.data().len() != pw as usize * n {
+                bail!(
+                    "interlaced PNG row of {} bytes where a pass of {pw} texels has {}",
+                    row.data().len(),
+                    pw as usize * n
+                );
+            }
+            passes.extend_from_slice(row.data());
+        }
+    }
+    let width = w as usize;
+    let mut data = zeroed(width * h as usize * 4)?;
+    let mut texels = passes.chunks_exact(n);
+    for (x0, y0, dx, dy) in ADAM7 {
+        let (pw, ph) = (pass_len(w, x0, dx), pass_len(h, y0, dy));
+        if pw == 0 {
+            continue;
+        }
+        for j in 0..ph {
+            let line = (y0 + j * dy) as usize * width;
+            for (i, p) in texels.by_ref().take(pw as usize).enumerate() {
+                let at = (line + x0 as usize + i * dx as usize) * 4;
+                data[at..at + 4].copy_from_slice(&rgba(p));
+            }
+        }
+    }
+    Ok(data)
+}
+
 pub fn decode_png(bytes: &[u8]) -> Result<Rgba> {
     let mut dec = png::Decoder::new(Cursor::new(bytes));
     dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
@@ -82,36 +185,39 @@ pub fn decode_png(bytes: &[u8]) -> Result<Rgba> {
     let size = reader
         .output_buffer_size()
         .ok_or_else(|| anyhow::anyhow!("PNG too large"))?;
+    let (w, h) = (reader.info().width, reader.info().height);
     if size > decodable_from(bytes.len()) {
         bail!(
-            "PNG header declares {} x {} pixels, more than a {} byte file can hold",
-            reader.info().width,
-            reader.info().height,
+            "PNG header declares {w} x {h} pixels, more than a {} byte file can hold",
             bytes.len()
         );
     }
+    // ... and never beyond the ceiling, however long the file is. Counted in 64 bits: the
+    // product of two 32-bit sizes does not fit a 32-bit `usize`
+    let rgba = u64::from(w)
+        .checked_mul(u64::from(h))
+        .and_then(|px| px.checked_mul(4))
+        .filter(|n| *n <= MAX_DECODED_BYTES)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "PNG of {w} x {h} pixels is more than the {MAX_DECODED_BYTES} bytes of RGBA \
+                 this reader decodes"
+            )
+        })? as usize;
     let (color, _) = reader.output_color_type();
-    let mut data = Vec::new();
-    let (w, h);
-    if reader.info().interlaced {
-        // The passes of an interlaced image fill the frame in turn, so the frame has to exist
-        // before its last pass is read
-        let mut buf = zeroed(size)?;
-        let info = reader.next_frame(&mut buf)?;
-        buf.truncate(info.buffer_size());
-        (w, h) = (info.width, info.height);
-        push_rgba(info.color_type, &buf, &mut data)?;
+    let data = if reader.info().interlaced {
+        read_interlaced(&mut reader, w, h, color)?
     } else {
         // Rows are appended as they are decoded, so the output costs nothing beyond the rows that
         // exist. The `png` crate itself holds a row of the header's width (zero-filled, a few
-        // times the row's bytes), which the ratio check above bounds like the whole frame.
-        (w, h) = (reader.info().width, reader.info().height);
+        // times the row's bytes), which the checks above bound like the whole frame.
+        let mut data = Vec::new();
         while let Some(row) = reader.next_row()? {
             push_rgba(color, row.data(), &mut data)?;
         }
-    }
-    let px = w as usize * h as usize;
-    if data.len() != px * 4 {
+        data
+    };
+    if data.len() != rgba {
         bail!("PNG decoded to {} bytes for {w}x{h}", data.len());
     }
     Ok(Rgba {
@@ -270,8 +376,9 @@ mod tests {
         assert!(decode_png(&declaring(16384, 16384)).is_err());
     }
 
-    /// The bound is the ratio and nothing else: a header one byte over `decodable_from(len)` is
-    /// refused, one exactly at it is believed (and fails later, on its data)
+    /// Below the ceiling the bound is the ratio alone: a header one byte over
+    /// `decodable_from(len)` is refused, one exactly at it is believed (and fails later, on its
+    /// data)
     #[test]
     fn the_ratio_is_refused_just_above_and_believed_at_the_bound() {
         let len = declaring(1, 1).len();
@@ -391,13 +498,21 @@ mod tests {
         (b << 16) | a
     }
 
-    /// A zlib stream of stored blocks (RFC 1950, RFC 1951 section 3.2.4)
+    /// A zlib stream of stored blocks (RFC 1950, RFC 1951 section 3.2.4), each of 65535 bytes at
+    /// most
     fn zlib_stored(data: &[u8]) -> Vec<u8> {
         let mut out = vec![0x78, 0x01];
-        out.push(1); // final block, stored
-        out.extend_from_slice(&(data.len() as u16).to_le_bytes());
-        out.extend_from_slice(&(!(data.len() as u16)).to_le_bytes());
-        out.extend_from_slice(data);
+        let blocks: Vec<&[u8]> = if data.is_empty() {
+            vec![data]
+        } else {
+            data.chunks(65535).collect()
+        };
+        for (i, block) in blocks.iter().enumerate() {
+            out.push((i + 1 == blocks.len()) as u8); // final block or not, stored
+            out.extend_from_slice(&(block.len() as u16).to_le_bytes());
+            out.extend_from_slice(&(!(block.len() as u16)).to_le_bytes());
+            out.extend_from_slice(block);
+        }
         out.extend_from_slice(&adler32(data).to_be_bytes());
         out
     }
@@ -541,5 +656,224 @@ mod tests {
     #[test]
     fn garbage_is_an_error() {
         assert!(decode_png(b"not a png").is_err());
+    }
+
+    /// The interlaced path as it was before the passes were read row by row: the whole frame at
+    /// once, through the `png` crate's own de-interlacing. The reference the row-wise path is
+    /// compared with.
+    fn decode_by_frame(bytes: &[u8]) -> Result<Rgba> {
+        let mut dec = png::Decoder::new(Cursor::new(bytes));
+        dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+        let mut reader = dec.read_info()?;
+        let size = reader.output_buffer_size().unwrap();
+        let mut buf = zeroed(size)?;
+        let info = reader.next_frame(&mut buf)?;
+        buf.truncate(info.buffer_size());
+        let mut data = Vec::new();
+        push_rgba(info.color_type, &buf, &mut data)?;
+        if data.len() != info.width as usize * info.height as usize * 4 {
+            bail!("PNG decoded to {} bytes", data.len());
+        }
+        Ok(Rgba {
+            width: info.width,
+            height: info.height,
+            data,
+        })
+    }
+
+    /// Samples per pixel of a PNG colour type code (PNG specification, section 11.2.2)
+    fn samples(color: u8) -> u32 {
+        match color {
+            0 | 3 => 1,
+            4 => 2,
+            2 => 3,
+            _ => 4,
+        }
+    }
+
+    /// The pass rows of an Adam7 image of `w` x `h` as the specification stores them (section
+    /// 8.2): each row a filter byte 0, then its pixels packed from the most significant bit.
+    /// `px(x, y)` gives the `bits` bits of a pixel.
+    fn adam7_rows(w: u32, h: u32, bits: u32, px: impl Fn(u32, u32) -> u64) -> Vec<u8> {
+        let mut raw = Vec::new();
+        for (x0, y0, dx, dy) in ADAM7 {
+            let (pw, ph) = (pass_len(w, x0, dx), pass_len(h, y0, dy));
+            if pw == 0 {
+                continue;
+            }
+            for j in 0..ph {
+                raw.push(0);
+                let (mut acc, mut n) = (0u8, 0);
+                for i in 0..pw {
+                    let v = px(x0 + i * dx, y0 + j * dy);
+                    for b in (0..bits).rev() {
+                        acc = (acc << 1) | ((v >> b) & 1) as u8;
+                        n += 1;
+                        if n == 8 {
+                            raw.push(acc);
+                            (acc, n) = (0, 0);
+                        }
+                    }
+                }
+                if n > 0 {
+                    raw.push(acc << (8 - n));
+                }
+            }
+        }
+        raw
+    }
+
+    /// An interlaced PNG around `raw` pass rows; `chunks` go between `IHDR` and `IDAT`
+    fn adam7_png(w: u32, h: u32, depth: u8, color: u8, chunks: &[Vec<u8>], raw: &[u8]) -> Vec<u8> {
+        let mut ihdr = w.to_be_bytes().to_vec();
+        ihdr.extend_from_slice(&h.to_be_bytes());
+        ihdr.extend_from_slice(&[depth, color, 0, 0, 1]);
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        png.extend(chunk(b"IHDR", &ihdr));
+        for c in chunks {
+            png.extend_from_slice(c);
+        }
+        png.extend(chunk(b"IDAT", &zlib_stored(raw)));
+        png.extend(chunk(b"IEND", &[]));
+        png
+    }
+
+    /// Pixel values that differ from texel to texel: a 64-bit mix of the coordinates
+    fn noise(x: u32, y: u32, bits: u32) -> u64 {
+        let mut v = (u64::from(x) + 1).wrapping_mul(0x9e37_79b9_7f4a_7c15)
+            ^ (u64::from(y) + 1).wrapping_mul(0xc2b2_ae3d_27d4_eb4f);
+        v ^= v >> 29;
+        v.wrapping_mul(0xbf58_476d_1ce4_e5b9) >> (64 - bits)
+    }
+
+    /// Every colour type and bit depth an interlaced PNG can have, with the chunks it needs
+    fn interlaced_kinds() -> Vec<(u8, u8, Vec<Vec<u8>>)> {
+        let palette = |depth: u8, transparent: usize| {
+            let n = 1usize << depth;
+            let rgb: Vec<u8> = (0..n * 3).map(|i| (i * 37 + 11) as u8).collect();
+            let mut chunks = vec![chunk(b"PLTE", &rgb)];
+            if transparent > 0 {
+                let alpha: Vec<u8> = (0..transparent.min(n)).map(|i| (i * 90) as u8).collect();
+                chunks.push(chunk(b"tRNS", &alpha));
+            }
+            chunks
+        };
+        let mut kinds: Vec<(u8, u8, Vec<Vec<u8>>)> = Vec::new();
+        for depth in [1, 2, 4, 8, 16] {
+            kinds.push((0, depth, vec![]));
+        }
+        // a grey and an RGB image with one transparent colour
+        kinds.push((0, 8, vec![chunk(b"tRNS", &[0, 7])]));
+        kinds.push((0, 2, vec![chunk(b"tRNS", &[0, 1])]));
+        kinds.push((2, 8, vec![chunk(b"tRNS", &[0, 1, 0, 2, 0, 3])]));
+        for depth in [8, 16] {
+            kinds.push((2, depth, vec![]));
+            kinds.push((4, depth, vec![]));
+            kinds.push((6, depth, vec![]));
+        }
+        for depth in [1, 2, 4, 8] {
+            kinds.push((3, depth, palette(depth, 0)));
+            kinds.push((3, depth, palette(depth, 3)));
+        }
+        kinds
+    }
+
+    /// The row-wise path gives exactly what the whole-frame path gave, for every colour type,
+    /// bit depth and size: sizes 1 to 17 cover every combination of empty and partial passes
+    #[test]
+    fn an_interlaced_image_decodes_row_by_row_to_the_same_texels_as_frame_by_frame() {
+        let mut sizes: Vec<(u32, u32)> = (1..=17)
+            .flat_map(|w| (1..=17).map(move |h| (w, h)))
+            .collect();
+        sizes.extend([(64, 48), (33, 1), (1, 33), (100, 7), (7, 100)]);
+        let mut compared = 0;
+        for (color, depth, chunks) in interlaced_kinds() {
+            let bits = u32::from(depth) * samples(color);
+            for &(w, h) in &sizes {
+                let raw = adam7_rows(w, h, bits, |x, y| noise(x, y, bits));
+                let png = adam7_png(w, h, depth, color, &chunks, &raw);
+                let want = decode_by_frame(&png)
+                    .unwrap_or_else(|e| panic!("colour {color} depth {depth} {w}x{h}: {e:#}"));
+                let got = decode_png(&png)
+                    .unwrap_or_else(|e| panic!("colour {color} depth {depth} {w}x{h}: {e:#}"));
+                assert_eq!((got.width, got.height), (w, h));
+                assert!(
+                    got == want,
+                    "colour {color} depth {depth} {w}x{h} differs from the whole-frame decode"
+                );
+                compared += 1;
+            }
+        }
+        assert_eq!(compared, 22 * (17 * 17 + 5));
+    }
+
+    /// The texels land where the file's own coordinates put them, not only where the reference
+    /// decoder puts them: 8-bit RGBA holds the texel as it is written
+    #[test]
+    fn an_interlaced_rgba_image_holds_each_texel_at_its_own_place() {
+        let (w, h) = (13u32, 9u32);
+        let raw = adam7_rows(w, h, 32, |x, y| noise(x, y, 32));
+        let img = decode_png(&adam7_png(w, h, 8, 6, &[], &raw)).unwrap();
+        for y in 0..h {
+            for x in 0..w {
+                let at = ((y * w + x) * 4) as usize;
+                assert_eq!(
+                    img.data[at..at + 4],
+                    (noise(x, y, 32) as u32).to_be_bytes(),
+                    "texel {x},{y}"
+                );
+            }
+        }
+    }
+
+    /// An interlaced image whose data stops early is an error in both paths, wherever it stops
+    #[test]
+    fn an_interlaced_image_cut_short_is_an_error() {
+        let (w, h) = (9u32, 9u32);
+        let raw = adam7_rows(w, h, 8, |x, y| noise(x, y, 8));
+        for keep in [0, 1, 2, 5, raw.len() / 2, raw.len() - 1] {
+            let png = adam7_png(w, h, 8, 0, &[], &raw[..keep]);
+            assert!(decode_by_frame(&png).is_err(), "{keep} bytes");
+            assert!(decode_png(&png).is_err(), "{keep} bytes");
+        }
+        assert!(decode_png(&adam7_png(w, h, 8, 0, &[], &raw)).is_ok());
+    }
+
+    /// A PNG whose header declares `w` x `h` 8-bit RGBA pixels and whose data is `rows` bytes of
+    /// zeros: the first rows of the image, and nothing after them
+    fn declaring_with_rows(w: u32, h: u32, interlaced: bool, rows: usize) -> Vec<u8> {
+        let mut ihdr = w.to_be_bytes().to_vec();
+        ihdr.extend_from_slice(&h.to_be_bytes());
+        ihdr.extend_from_slice(&[8, 6, 0, 0, interlaced as u8]);
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        png.extend(chunk(b"IHDR", &ihdr));
+        png.extend(chunk(b"IDAT", &zlib_stored(&vec![0; rows])));
+        png.extend(chunk(b"IEND", &[]));
+        png
+    }
+
+    /// Found by review: the ratio was the only bound, so a file of a few megabytes could decode
+    /// to many gigabytes. A header over the ceiling is refused before any row is decoded, however
+    /// long the file is; one exactly at the ceiling is believed (and fails later, on its data).
+    #[test]
+    fn a_header_over_the_ceiling_is_refused_whatever_the_length_of_the_file() {
+        // 16384 x 16384 RGBA is the ceiling, 1 GiB; 40 KB of data are enough for the ratio
+        for interlaced in [false, true] {
+            let over = declaring_with_rows(16385, 16384, interlaced, 40_000);
+            assert!(16385 * 16384 * 4 <= decodable_from(over.len()));
+            let err = decode_png(&over).unwrap_err();
+            assert!(
+                format!("{err:#}").contains("this reader decodes"),
+                "{err:#}"
+            );
+            let at = declaring_with_rows(16384, 16384, interlaced, 40_000);
+            let err = decode_png(&at).unwrap_err();
+            assert!(
+                !format!("{err:#}").contains("this reader decodes"),
+                "{err:#}"
+            );
+        }
+        // sizes whose product does not fit 64 bits are refused too, by the ratio first
+        assert!(decode_png(&declaring(u32::MAX >> 1, u32::MAX >> 1)).is_err());
     }
 }

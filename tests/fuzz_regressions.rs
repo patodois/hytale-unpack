@@ -348,3 +348,65 @@ fn a_png_cut_short_does_not_reserve_what_its_header_claims() {
         "allocated {largest} bytes at once for a header that claims {claimed}"
     );
 }
+
+/// CRC-32 of the PNG specification (section 5.5), bit by bit
+fn crc32(data: &[u8]) -> u32 {
+    let mut c = 0xffff_ffffu32;
+    for &b in data {
+        c ^= b as u32;
+        for _ in 0..8 {
+            c = if c & 1 != 0 {
+                0xedb8_8320 ^ (c >> 1)
+            } else {
+                c >> 1
+            };
+        }
+    }
+    !c
+}
+
+fn png_chunk(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+    let mut out = (body.len() as u32).to_be_bytes().to_vec();
+    let mut crc_in = kind.to_vec();
+    crc_in.extend_from_slice(body);
+    out.extend_from_slice(&crc_in);
+    out.extend_from_slice(&crc32(&crc_in).to_be_bytes());
+    out
+}
+
+/// Found by review: for an interlaced image the whole frame its header declares was reserved and
+/// filled with zeros before a single row was decoded, so a file of 2 MB that declares 60,000 x
+/// 60,000 pixels took 14 GB on its way to a decode error. Here: 8192 x 8192 RGBA, interlaced (a
+/// 256 MiB frame), in a file of 57 KB, long enough for the ratio check, whose data is the first
+/// 14 rows of the first pass and nothing more. The memory taken must follow the rows that exist.
+#[test]
+fn an_interlaced_png_does_not_reserve_the_frame_its_header_claims() {
+    let (w, h) = (8192u32, 8192u32);
+    let mut ihdr = w.to_be_bytes().to_vec();
+    ihdr.extend_from_slice(&h.to_be_bytes());
+    // 8-bit RGBA, interlace method 1 (Adam7)
+    ihdr.extend_from_slice(&[8, 6, 0, 0, 1]);
+    // a row of the first pass is a filter byte and every eighth texel of the row
+    let rows = vec![0u8; 14 * (1 + 4 * 1024)];
+    // one stored DEFLATE block in a zlib stream (RFC 1950, RFC 1951 section 3.2.4); the
+    // Adler-32 of zeros is 1 in the low half and their count in the high half
+    let mut zlib = vec![0x78, 0x01, 1];
+    zlib.extend_from_slice(&(rows.len() as u16).to_le_bytes());
+    zlib.extend_from_slice(&(!(rows.len() as u16)).to_le_bytes());
+    zlib.extend_from_slice(&rows);
+    zlib.extend_from_slice(&(((rows.len() as u32 % 65521) << 16) | 1).to_be_bytes());
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    png.extend(png_chunk(b"IHDR", &ihdr));
+    png.extend(png_chunk(b"IDAT", &zlib));
+    png.extend(png_chunk(b"IEND", &[]));
+    let claimed = w as usize * h as usize * 4;
+    assert!(png.len() * 1032 * 32 >= claimed, "the ratio check passes");
+    let mut result = None;
+    let largest = counting::largest_allocation(|| result = Some(decode_png(&png)));
+    let err = result.unwrap().unwrap_err();
+    assert!(!format!("{err:#}").contains("more than"), "{err:#}");
+    assert!(
+        largest < claimed / 64,
+        "allocated {largest} bytes at once for a header that claims {claimed}"
+    );
+}
