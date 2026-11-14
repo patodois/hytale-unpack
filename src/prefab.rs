@@ -115,9 +115,18 @@ pub trait Visit {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many times this thread has called [`stream`]: a prefab is megabytes of JSON, and a
+    /// test can check that a load reads it once
+    pub(crate) static STREAMS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 /// Parses a prefab from a reader, calling `visit` for each block, fluid and (if wanted) entity as
 /// it goes by.
 pub fn stream<R: Read>(reader: R, visit: &mut dyn Visit) -> Result<(PrefabHeader, Counts)> {
+    #[cfg(test)]
+    STREAMS.with(|n| n.set(n.get() + 1));
     let mut de = serde_json::Deserializer::from_reader(BufReader::with_capacity(1 << 16, reader));
     let mut out = (PrefabHeader::default(), Counts::default());
     DocSeed {

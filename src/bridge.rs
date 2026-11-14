@@ -866,17 +866,14 @@ impl Hytale {
             hy: &'a Hytale,
             models: Vec<SceneModel>,
             index: HashMap<String, Option<usize>>,
-            instances: Vec<Instance>,
+            /// The cells that draw, in file order: the model, the cell and its `rotation`. The
+            /// anchor they are placed relative to may be written after the blocks, so the
+            /// transforms are made once the whole document has been read
+            cells: Vec<(usize, [i32; 3], u32)>,
             report: SceneReport,
-            anchor: [i32; 3],
-            /// The first block that could not be placed; no scene is returned then
-            error: Option<anyhow::Error>,
         }
         impl Collector<'_> {
             fn place(&mut self, b: &PrefabBlock) {
-                if self.error.is_some() {
-                    return;
-                }
                 self.report.blocks += 1;
                 if b.name == "Empty" {
                     self.report.empty += 1;
@@ -917,13 +914,8 @@ impl Hytale {
                     }
                     return;
                 };
-                match block_transform([b.x, b.y, b.z], self.anchor, b.rotation.unwrap_or(0)) {
-                    Ok(t) => {
-                        self.report.placed += 1;
-                        self.instances.push(Instance::new(model, t));
-                    }
-                    Err(e) => self.error = Some(e),
-                }
+                self.cells
+                    .push((model, [b.x, b.y, b.z], b.rotation.unwrap_or(0)));
             }
         }
         impl Visit for Collector<'_> {
@@ -931,34 +923,34 @@ impl Hytale {
                 self.place(b);
             }
         }
-        // Two passes over the entry's bytes (24 MB at most): the first for the anchor, which the
-        // blocks are placed relative to, the second for the blocks. Neither keeps the document.
-        let bytes = self.assets.read(id)?;
-        struct Nop;
-        impl Visit for Nop {}
-        let anchor = prefab::stream(&bytes[..], &mut Nop)?.0.anchor;
+        // One pass over the entry's bytes (24 MB at most), which does not keep the document
         let mut c = Collector {
             hy: self,
             models: Vec::new(),
             index: HashMap::new(),
-            instances: Vec::new(),
-            report: SceneReport {
-                anchor,
-                ..SceneReport::default()
-            },
-            anchor,
-            error: None,
+            cells: Vec::new(),
+            report: SceneReport::default(),
         };
-        let (_, counts) = prefab::stream(&bytes[..], &mut c)?;
-        if let Some(e) = c.error {
-            return Err(e.context(id.to_string()));
+        let (header, counts) = {
+            let bytes = self.assets.read(id)?;
+            prefab::stream(&bytes[..], &mut c)?
+        };
+        let anchor = header.anchor;
+        // The first cell that cannot be placed fails the scene
+        let mut instances = Vec::with_capacity(c.cells.len());
+        for (model, cell, rotation) in c.cells {
+            let t =
+                block_transform(cell, anchor, rotation).map_err(|e| e.context(id.to_string()))?;
+            instances.push(Instance::new(model, t));
         }
+        c.report.anchor = anchor;
+        c.report.placed = instances.len() as u64;
         c.report.fluids = counts.fluids;
         c.report.entities = counts.entities;
         let scene = Scene {
             name: stem(id).trim_end_matches(".prefab").to_string(),
             models: c.models,
-            instances: c.instances,
+            instances,
             ..Scene::default()
         };
         scene.validate()?;
@@ -1389,5 +1381,221 @@ mod tests {
         for k in 0..4 {
             assert!((r[k] - q2[k]).abs() < 1e-5);
         }
+    }
+
+    /// A provider over a small archive made here: two cube blocks, a prefab per given document
+    struct Fake {
+        hy: Hytale,
+        path: std::path::PathBuf,
+    }
+
+    impl Drop for Fake {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+
+    fn fake(tag: &str, prefabs: &[(&str, String)]) -> Fake {
+        use std::io::Write;
+        let cube = |texture: &str| {
+            format!(r#"{{"BlockType":{{"DrawType":"Cube","Textures":[{{"All":"{texture}"}}]}}}}"#)
+        };
+        let png = |v: u8| crate::image::encode_png(1, 1, &[v, v, v, 255]).unwrap();
+        let mut files: Vec<(String, Vec<u8>)> = vec![
+            ("Common/T/Stone.png".into(), png(90)),
+            ("Common/T/Wood.png".into(), png(160)),
+            (
+                "Server/Item/Items/Rock_Stone.json".into(),
+                cube("T/Stone.png").into_bytes(),
+            ),
+            (
+                "Server/Item/Items/Wood_Oak.json".into(),
+                cube("T/Wood.png").into_bytes(),
+            ),
+            (
+                "Server/Item/Items/Barrier.json".into(),
+                br#"{"BlockType":{"DrawType":"Empty"}}"#.to_vec(),
+            ),
+        ];
+        for (name, doc) in prefabs {
+            files.push((
+                format!("Server/Prefabs/{name}.prefab.json"),
+                doc.clone().into_bytes(),
+            ));
+        }
+        let path = std::env::temp_dir().join(format!(
+            "hytale-unpack-scene-{tag}-{}.zip",
+            std::process::id()
+        ));
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for (name, bytes) in &files {
+            zip.start_file(name, opts).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+        zip.finish().unwrap();
+        Fake {
+            hy: Hytale::open(&path).unwrap(),
+            path,
+        }
+    }
+
+    const CELLS: &str = r#"
+        {"x":5,"y":7,"z":-3,"name":"Rock_Stone"},
+        {"x":6,"y":7,"z":-3,"name":"Wood_Oak","rotation":1},
+        {"x":5,"y":8,"z":-3,"name":"Empty"},
+        {"x":5,"y":9,"z":-3,"name":"Rock_Stone","filler":1024},
+        {"x":4,"y":7,"z":-2,"name":"Barrier"},
+        {"x":4,"y":7,"z":-1,"name":"Nothing_Of_That_Name"},
+        {"x":5,"y":7,"z":-1,"name":"Rock_Stone","rotation":8},
+        {"x":-2,"y":0,"z":9,"name":"Wood_Oak","rotation":18}"#;
+    const ANCHOR: &str = r#""anchorX":5,"anchorY":7,"anchorZ":-3"#;
+    const REST: &str = r#""fluids":[{"x":0,"y":0,"z":0,"name":"Water_Source","level":1}],
+        "entities":[{"Components":{}},{"Components":{}}]"#;
+
+    /// The scene of a prefab does not depend on where the document writes its anchor: before the
+    /// blocks, after them, or between the other lists. The placements are spelled out, so the
+    /// test holds for any way of reading the document.
+    #[test]
+    fn a_scene_is_the_same_wherever_the_document_writes_its_anchor() {
+        let head = r#""version":8,"blockIdVersion":11"#;
+        let blocks = format!(r#""blocks":[{CELLS}]"#);
+        let docs = [
+            ("First", format!("{{{head},{ANCHOR},{blocks},{REST}}}")),
+            ("Last", format!("{{{head},{blocks},{REST},{ANCHOR}}}")),
+            ("Middle", format!("{{{blocks},{ANCHOR},{REST},{head}}}")),
+            // an anchor written twice: the later one counts, as it did when the anchor was read
+            // in a pass of its own
+            (
+                "Twice",
+                format!(
+                    r#"{{"anchorX":1,"anchorY":1,"anchorZ":1,{blocks},{REST},{ANCHOR},{head}}}"#
+                ),
+            ),
+        ];
+        let f = fake("anchor", &docs);
+        let load = |name: &str| {
+            f.hy.load_scene_report(&format!("Server/Prefabs/{name}.prefab.json"))
+                .unwrap()
+        };
+        let (first, report) = load("First");
+        first.validate().unwrap();
+        assert_eq!(
+            report,
+            SceneReport {
+                blocks: 8,
+                placed: 4,
+                empty: 1,
+                fillers: 1,
+                unresolved: [
+                    ("Barrier".to_string(), 1),
+                    ("Nothing_Of_That_Name".to_string(), 1)
+                ]
+                .into(),
+                failed: BTreeMap::new(),
+                fluids: 1,
+                entities: 2,
+                anchor: [5, 7, -3],
+            }
+        );
+        // one model per block name, in the order the names first occur
+        let names: Vec<&str> = first
+            .models
+            .iter()
+            .map(|m| match m {
+                SceneModel::Inline(m) => m.name.as_str(),
+                _ => "?",
+            })
+            .collect();
+        assert_eq!(names, ["Rock_Stone", "Wood_Oak"]);
+        // one instance per drawn cell, in file order, at the cell minus the anchor
+        let placed: Vec<(usize, [f32; 3], [f32; 4])> = first
+            .instances
+            .iter()
+            .map(|i| (i.model, i.transform.translation, i.transform.rotation))
+            .collect();
+        let at = |cell: [i32; 3], rotation: u32| {
+            let t = block_transform(cell, [5, 7, -3], rotation).unwrap();
+            (t.translation, t.rotation)
+        };
+        let want: Vec<(usize, [f32; 3], [f32; 4])> = [
+            (0, [5, 7, -3], 0),
+            (1, [6, 7, -3], 1),
+            (0, [5, 7, -1], 8),
+            (1, [-2, 0, 9], 18),
+        ]
+        .into_iter()
+        .map(|(model, cell, rotation)| {
+            let (t, r) = at(cell, rotation);
+            (model, t, r)
+        })
+        .collect();
+        assert_eq!(placed, want);
+        assert_eq!(placed[0].1, [0.5, 0.0, 0.5]);
+        assert_eq!((placed[1].1[0], placed[1].1[2]), (1.5, 0.5));
+        for name in ["Last", "Middle", "Twice"] {
+            let (scene, r) = load(name);
+            assert_eq!(r, report, "{name}");
+            assert_eq!(scene.models.len(), first.models.len(), "{name}");
+            let got: Vec<(usize, [f32; 3], [f32; 4])> = scene
+                .instances
+                .iter()
+                .map(|i| (i.model, i.transform.translation, i.transform.rotation))
+                .collect();
+            assert_eq!(got, placed, "{name}");
+        }
+    }
+
+    /// A cell that cannot be placed fails the scene with the cell and the anchor in the message,
+    /// also when the anchor comes after the blocks; a document that is not valid JSON fails with
+    /// the parser's error whatever its cells are
+    #[test]
+    fn a_scene_fails_on_the_first_cell_too_far_from_the_anchor_and_on_bad_json() {
+        let far = r#"{"x":2147483647,"y":0,"z":0,"name":"Rock_Stone"},
+                     {"x":0,"y":-2147483648,"z":0,"name":"Wood_Oak"}"#;
+        let docs = [
+            (
+                "Far",
+                format!(r#"{{"blocks":[{far}],"anchorX":-1,"anchorY":1,"anchorZ":0}}"#),
+            ),
+            (
+                "FarFirst",
+                format!(r#"{{"anchorX":-1,"anchorY":1,"anchorZ":0,"blocks":[{far}]}}"#),
+            ),
+            (
+                "Cut",
+                format!(r#"{{"blocks":[{far}],"anchorX":-1,"anchorY":1,"#),
+            ),
+        ];
+        let f = fake("far", &docs);
+        let err = |name: &str| {
+            let e =
+                f.hy.load_scene_report(&format!("Server/Prefabs/{name}.prefab.json"))
+                    .unwrap_err();
+            format!("{e:#}")
+        };
+        let want = "Server/Prefabs/Far.prefab.json: block at [2147483647, 0, 0] is too far from \
+                    the anchor [-1, 1, 0] to be placed";
+        assert_eq!(err("Far"), want);
+        assert_eq!(
+            err("FarFirst"),
+            want.replace("Far.prefab", "FarFirst.prefab")
+        );
+        assert!(err("Cut").contains("EOF while parsing"), "{}", err("Cut"));
+    }
+
+    /// Found by review: every scene load parsed its prefab twice, once only for the anchor (2.0
+    /// GB of JSON in the install, for a full sweep). The document is read once.
+    #[test]
+    fn a_scene_load_parses_its_prefab_once() {
+        let doc = format!(r#"{{"blocks":[{CELLS}],{ANCHOR},{REST}}}"#);
+        let f = fake("once", &[("One", doc)]);
+        let before = prefab::STREAMS.with(|n| n.get());
+        let (scene, _) =
+            f.hy.load_scene_report("Server/Prefabs/One.prefab.json")
+                .unwrap();
+        assert_eq!(scene.instances.len(), 4);
+        assert_eq!(prefab::STREAMS.with(|n| n.get()) - before, 1);
     }
 }

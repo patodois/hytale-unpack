@@ -535,6 +535,8 @@ skipped (0), the channels trimmed (2) and the channels left out of a kept clip (
   their error. `prefab -o` prints them, and `check-bridge` counts such a scene as failed. Going by what
   [Numbers](#numbers) records for the install, no prefab there has one: the only two names that were in
   `unresolved` are blocks the game does not draw. `Defs::names_item` is new as well.
+- A scene load parses its prefab once. It used to parse it twice, the first time only for the anchor, which a
+  document may write after its blocks. The scene and its report are the same.
 
 ## Changes in 0.4.0
 
