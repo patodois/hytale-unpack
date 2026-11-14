@@ -39,6 +39,8 @@ Its targets are `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-l
 - Read the archive's central directory and individual entries; never load or extract the whole archive.
 - `assets.rs` limits an entry's actual decoded bytes to 256 MiB, independent of claimed zip sizes.
 - Game tests use `HYTALE_ASSETS` or the known macOS install and skip without either.
+- `check` and `check-bridge` exit with status 1 when an entry fails and print it on a `FAILED` line;
+  `check-conformance` exits with the checker's status (0, 1 or 2).
 - Keep models, textures, icons and rendered outputs outside the repository.
 
 ## Public files

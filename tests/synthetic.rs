@@ -391,3 +391,181 @@ fn prefab_special_component_does_not_export_to_parent() {
     assert!(!result.status.success());
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+// ---- blocks and scenes ----
+
+const ROCK: &str =
+    r#"{"BlockType":{"DrawType":"Cube","Textures":[{"All":"BlockTextures/Rock.png"}]}}"#;
+
+/// A cube block `Rock_Stone`, a `Rail` with one state, `Barrier` (a block that draws nothing)
+/// and a texture, plus the given prefab cells in `Server/Prefabs/Test/Mixed.prefab.json`
+fn block_files(extra: &[(&str, &str)], cells: &[&str]) -> Vec<(String, Vec<u8>)> {
+    let f = |n: &str, b: Vec<u8>| (n.to_string(), b);
+    let mut files = vec![
+        f("Common/BlockTextures/Rock.png", grey_png(4, 4, 90)),
+        f("Server/Item/Items/Rock/Rock_Stone.json", ROCK.into()),
+        f(
+            "Server/Item/Items/Rail/Rail.json",
+            br#"{"BlockType":{"DrawType":"Cube","Textures":[{"All":"BlockTextures/Rock.png"}],
+                "State":{"Definitions":{"Corner":{"Textures":[{"Sides":"BlockTextures/Rock.png"}]}}}}}"#
+                .to_vec(),
+        ),
+        f(
+            "Server/Item/Items/Barrier.json",
+            br#"{"BlockType":{"DrawType":"Empty"}}"#.to_vec(),
+        ),
+    ];
+    for (name, json) in extra {
+        files.push(f(name, json.as_bytes().to_vec()));
+    }
+    let blocks: Vec<String> = cells
+        .iter()
+        .enumerate()
+        .map(|(i, name)| format!(r#"{{"x":{i},"y":0,"z":0,"name":"{name}"}}"#))
+        .collect();
+    files.push(f(
+        "Server/Prefabs/Test/Mixed.prefab.json",
+        format!(
+            r#"{{"version":8,"blockIdVersion":11,"anchorX":0,"anchorY":0,"anchorZ":0,"blocks":[{}]}}"#,
+            blocks.join(",")
+        )
+        .into_bytes(),
+    ));
+    files
+}
+
+const MIXED: &str = "Server/Prefabs/Test/Mixed.prefab.json";
+
+/// Found by review: a block that failed to load was counted with the names that match no block,
+/// without its error, and the scene looked complete.
+#[test]
+fn a_block_that_fails_to_load_is_reported_as_failed_not_as_matching_no_block() {
+    let fake = archive(&block_files(
+        &[
+            (
+                "Server/Item/Items/Broken_Texture.json",
+                r#"{"BlockType":{"DrawType":"Cube","Textures":[{"All":"BlockTextures/Missing.png"}]}}"#,
+            ),
+            (
+                "Server/Item/Items/Broken_Model.json",
+                r#"{"BlockType":{"DrawType":"Model","CustomModel":"Blocks/Broken.blockymodel"}}"#,
+            ),
+            ("Common/Blocks/Broken.blockymodel", "{"),
+        ],
+        &[
+            "Rock_Stone",
+            "*Rail_State_Definitions_Corner",
+            "*Rail_State_Definitions_Nope",
+            "Broken_Texture",
+            "Broken_Model",
+            "*Rail_State_Definitions_Nope",
+            "Barrier",
+            "Not_An_Item",
+            "Empty",
+            "Rock_Stone",
+            "Broken_Model",
+        ],
+    ));
+    let (scene, report) = fake.hy.load_scene_report(MIXED).unwrap();
+    scene.validate().unwrap();
+    // what loads is placed as before
+    assert_eq!(scene.models.len(), 2);
+    assert_eq!(scene.instances.len(), 3);
+    assert_eq!((report.blocks, report.placed, report.empty), (11, 3, 1));
+    // a block the game does not draw and a name with no item behind it match no block
+    let unresolved: Vec<(&str, u64)> = report
+        .unresolved
+        .iter()
+        .map(|(k, v)| (k.as_str(), *v))
+        .collect();
+    assert_eq!(unresolved, [("Barrier", 1), ("Not_An_Item", 1)]);
+    // the three that exist and did not load are failures, each with its cells and its error
+    let failed: Vec<(&str, u64)> = report
+        .failed
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.0))
+        .collect();
+    assert_eq!(
+        failed,
+        [
+            ("*Rail_State_Definitions_Nope", 2),
+            ("Broken_Model", 2),
+            ("Broken_Texture", 1)
+        ]
+    );
+    assert!(
+        report.failed["*Rail_State_Definitions_Nope"]
+            .1
+            .contains("no state Nope"),
+        "{:?}",
+        report.failed
+    );
+    assert!(report.failed["Broken_Texture"].1.contains("Missing.png"));
+    assert!(report.failed["Broken_Model"]
+        .1
+        .contains("Broken.blockymodel"));
+    // every cell is accounted for
+    let skipped: u64 =
+        report.unresolved.values().sum::<u64>() + report.failed.values().map(|f| f.0).sum::<u64>();
+    assert_eq!(
+        report.blocks,
+        report.placed + report.empty + report.fillers + skipped
+    );
+}
+
+fn check_bridge(fake: &Fake) -> (std::process::ExitStatus, String) {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_hytale-unpack"))
+        .arg("--assets")
+        .arg(&fake.path)
+        .args(["check-bridge", "--scenes", "30"])
+        .output()
+        .unwrap();
+    (
+        out.status,
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+    )
+}
+
+/// Found by review: `check-bridge` printed its failures and exited with 0, and a block state that
+/// only a prefab names (nothing else loads it) did not even count as one.
+#[test]
+fn check_bridge_exits_with_1_when_a_block_of_a_scene_fails_to_load() {
+    let fake = archive(&block_files(
+        &[],
+        &["Rock_Stone", "*Rail_State_Definitions_Nope", "Barrier"],
+    ));
+    let (status, stdout) = check_bridge(&fake);
+    assert_eq!(status.code(), Some(1), "{stdout}");
+    assert!(
+        stdout.contains(&format!("FAILED {MIXED}: 1 block names failed to load")),
+        "{stdout}"
+    );
+    assert!(stdout.contains("*Rail_State_Definitions_Nope (1 cells)"));
+    assert!(stdout.contains("no state Nope"), "{stdout}");
+    // the block that draws nothing is still only a name that matches no drawable block
+    assert!(
+        stdout.contains("1 block names (1 cells) matched no drawable block"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn check_bridge_exits_with_1_when_a_model_fails_and_with_0_when_all_load() {
+    let good = archive(&block_files(
+        &[],
+        &["Rock_Stone", "*Rail_State_Definitions_Corner", "Barrier"],
+    ));
+    let (status, stdout) = check_bridge(&good);
+    assert_eq!(status.code(), Some(0), "{stdout}");
+    assert!(!stdout.contains("FAILED"), "{stdout}");
+
+    let mut files = block_files(&[], &["Rock_Stone"]);
+    files.push(("Common/Broken.blockymodel".into(), b"{".to_vec()));
+    let bad = archive(&files);
+    let (status, stdout) = check_bridge(&bad);
+    assert_eq!(status.code(), Some(1), "{stdout}");
+    assert!(
+        stdout.contains("FAILED Common/Broken.blockymodel"),
+        "{stdout}"
+    );
+}

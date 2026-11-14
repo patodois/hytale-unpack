@@ -305,19 +305,20 @@ impl Defs {
         Ok(Some(bt))
     }
 
+    /// Whether a prefab cell name or item id names an item that exists: the name itself, or the
+    /// item of a state name (`Rail` for `*Rail_State_Definitions_Corner_Left`). Says nothing about
+    /// whether that item is a block or loads.
+    pub fn names_item(&self, name: &str) -> bool {
+        self.items.contains_key(split_block_name(name).0)
+    }
+
     /// The block a prefab cell or item id names, or `None` for things that draw nothing
     /// (`Empty`, items that are not blocks).
     pub fn block(&self, assets: &Assets, name: &str) -> Result<Option<BlockDesc>> {
         if name == "Empty" {
             return Ok(None);
         }
-        let (id, state) = match name
-            .strip_prefix('*')
-            .and_then(|n| n.split_once("_State_Definitions_"))
-        {
-            Some((id, state)) => (id, Some(state)),
-            None => (name, None),
-        };
+        let (id, state) = split_block_name(name);
         let Some(mut bt) = self.block_type(assets, id, 0)? else {
             return Ok(None);
         };
@@ -329,6 +330,18 @@ impl Defs {
             bt = merge(&bt, &def);
         }
         Ok(Some(BlockDesc::from_json(&bt)))
+    }
+}
+
+/// The item id of a block name and, for a state name (`*Rail_State_Definitions_Corner_Left`), the
+/// state
+fn split_block_name(name: &str) -> (&str, Option<&str>) {
+    match name
+        .strip_prefix('*')
+        .and_then(|n| n.split_once("_State_Definitions_"))
+    {
+        Some((id, state)) => (id, Some(state)),
+        None => (name, None),
     }
 }
 

@@ -69,7 +69,7 @@ enum Cmd {
     /// Parse every model, clip and prefab, streaming, and report counts and peak memory
     Check,
     /// Load every entity model, model and block through the provider and validate it; with
-    /// --scenes N also every prefab below N MB
+    /// --scenes N also every prefab below N MB. Exits with status 1 when anything failed
     CheckBridge {
         #[arg(long)]
         scenes: Option<f64>,
@@ -647,6 +647,17 @@ fn run_bridge(cmd: Cmd, path: &std::path::Path) -> Result<()> {
                         println!("    {c:>6}  {name}");
                     }
                 }
+                if !report.failed.is_empty() {
+                    let n: u64 = report.failed.values().map(|f| f.0).sum();
+                    println!(
+                        "  {} cells of {} blocks that failed to load were not placed:",
+                        n,
+                        report.failed.len()
+                    );
+                    for (name, (c, why)) in report.failed.iter().take(10) {
+                        println!("    {c:>6}  {name}: {why}");
+                    }
+                }
                 // a building comes with one texture per block model: give each prefab its own folder
                 let dir = dir.join(&scene.name);
                 let gltf_path = gltf::write_scene(&scene, &scene.name, &dir)?;
@@ -708,11 +719,26 @@ fn cmd_check_bridge(hy: &hytale_unpack::bridge::Hytale, scenes: Option<f64>) -> 
             hy.clear_cache();
         }
         let res: Result<()> = if kind == 3 {
-            hy.load_scene_report(id).map(|(s, r)| {
+            hy.load_scene_report(id).and_then(|(s, r)| {
                 instances += s.instances.len() as u64;
                 for (k, v) in r.unresolved {
                     *unresolved.entry(k).or_default() += v;
                 }
+                // a scene that left out a block because the block did not load is a failure:
+                // block states are named by prefabs only, so nothing else would show the error
+                if r.failed.is_empty() {
+                    return Ok(());
+                }
+                let blocks: Vec<String> = r
+                    .failed
+                    .iter()
+                    .map(|(name, (cells, why))| format!("{name} ({cells} cells): {why}"))
+                    .collect();
+                bail!(
+                    "{} block names failed to load: {}",
+                    blocks.len(),
+                    blocks.join("; ")
+                )
             })
         } else if kind == 2 {
             // a block that draws nothing (DrawType Empty and the like) is not a failure
@@ -839,5 +865,10 @@ fn cmd_check_bridge(hy: &hytale_unpack::bridge::Hytale, scenes: Option<f64>) -> 
         check::peak_rss() as f64 / 1e6,
         start.elapsed().as_secs_f64()
     );
+    // like `check`: a script can rely on the status
+    let failed: u64 = failed.iter().sum();
+    if failed > 0 {
+        bail!("{failed} assets failed");
+    }
     Ok(())
 }

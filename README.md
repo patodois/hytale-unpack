@@ -152,6 +152,14 @@ peak resident size): `list` 0.2 s and 120 MB (1 s when the archive's index of 60
 
 The output of `list` goes through a pipe quietly (`hytale-unpack list Kweebec | head`).
 
+**Exit status.** `check` and `check-bridge` exit with 0 when everything they looked at loaded, and with 1 when
+something failed; each failure is on a line that starts with `FAILED`, and the last line of the error output gives
+the count. For `check-bridge` a failure is a model, block or scene that does not load or validate, and also a
+scene that had to leave a block out because that block did not load (see `SceneReport::failed` under
+[Provider](#provider)). Block names that match no drawable block are printed and are not failures.
+`check-conformance` exits with the checker's status, see [Checking the provider](#checking-the-provider). The
+other commands exit with 1 on an error, and a mistake on the command line is status 2.
+
 Ids are entry paths in `Assets.zip`; the commands also accept the file stem of an item or entity model
 (`Rock_Stone`, `Player`) and paths without the leading folder.
 
@@ -274,7 +282,11 @@ let house = hy.load_scene("Server/Prefabs/Npc/Kweebec/Autumn/Houses_Small/Kweebe
   rule, 26 only if the cell is found by rounding down, none only by rounding to the nearest, and 37 neither (a mannequin
   at x = 2.85 stands on cell 2, which a cell centred on its coordinate would make cell 3). `rotation` is `yaw + 4 * pitch (+ 16 * roll)` in quarter turns, applied about the cell centre
   as `Ry(yaw) * Rx(pitch) * Rz(roll)`. Cells with a `filler` (parts of bigger blocks) and `Empty` cells are not drawn.
-  `load_scene_report` also returns what was skipped.
+  `load_scene_report` also returns what was skipped: the counts of those cells, the names that match no drawable
+  block (`SceneReport::unresolved`: a block the game does not draw, or a name with no item behind it), and, apart
+  from them, the blocks that exist and failed to load, each with its error (`SceneReport::failed`: a state the item
+  does not define, a model that does not parse, a missing texture). The cells of both are left out and the rest of
+  the scene is returned.
 - **Attachments** are composed for entity models; see [Attachments](#attachments).
 - **What is listed.** Only what draws something. Definitions in `Server/Models` without a `Model` (the showcase
   mannequins that are only particles) and items whose `BlockType` draws nothing are not listed: `DrawType: Empty`
@@ -516,6 +528,13 @@ skipped (0), the channels trimmed (2) and the channels left out of a kept clip (
   call reaches) were not measured.
 - An interlaced PNG is decoded pass row by pass row and its frame is made once every row has been read, instead
   of reserving and zero-filling the frame the header declares before any data is decoded. The texels are the same.
+- `check-bridge` exits with status 1 when anything failed; it used to print the failures and exit with 0. See
+  "Exit status" under [Build and use](#build-and-use).
+- `SceneReport` has a new field, `failed`: the blocks of a prefab that exist and did not load, with the cell count
+  and the error of each. They used to be counted in `unresolved`, with the names that match no block and without
+  their error. `prefab -o` prints them, and `check-bridge` counts such a scene as failed. Going by what
+  [Numbers](#numbers) records for the install, no prefab there has one: the only two names that were in
+  `unresolved` are blocks the game does not draw. `Defs::names_item` is new as well.
 
 ## Changes in 0.4.0
 

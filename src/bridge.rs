@@ -58,7 +58,10 @@
 //!   block goes to `(x - ax + 0.5, y - ay, z - az + 0.5)`;
 //! - `rotation` turns the block about its cell's centre, see [`crate::prefab::decode_rotation`];
 //! - cells with a `filler` do not draw (they belong to a bigger block), `Empty` cells do not draw,
-//!   and names that match no block are counted in the report and skipped;
+//!   and names that match no drawable block are counted in the report and skipped;
+//! - a block that exists and does not load (its state is not defined, its model does not parse,
+//!   its texture is missing) is not placed either, and the report lists it in
+//!   [`SceneReport::failed`] with the error, apart from the names that match nothing;
 //! - fluids and entities are not placed.
 
 use std::collections::{BTreeMap, HashMap};
@@ -99,8 +102,12 @@ pub struct SceneReport {
     pub placed: u64,
     pub empty: u64,
     pub fillers: u64,
-    /// Block names that matched no drawable block, with their cell counts
+    /// Block names that matched no drawable block, with their cell counts: blocks the game does
+    /// not draw (`DrawType: Empty`) and names with no item behind them
     pub unresolved: BTreeMap<String, u64>,
+    /// Block names whose item exists and whose block failed to load, with their cell counts and
+    /// the error. Their cells are not placed; the rest of the scene is.
+    pub failed: BTreeMap<String, (u64, String)>,
     pub fluids: u64,
     pub entities: u64,
     pub anchor: [i32; 3],
@@ -732,6 +739,17 @@ impl Hytale {
         }
     }
 
+    /// Whether a name [`Hytale::block_model`] accepts has an item behind it (the item of a
+    /// state name): the difference between a name that matches nothing and a block that fails
+    fn names_block_item(&self, name: &str) -> bool {
+        let name = if name.starts_with("Server/") {
+            stem(name)
+        } else {
+            name
+        };
+        self.defs.names_item(name)
+    }
+
     /// A block by item id (`Rock_Stone`), prefab cell name (`*Rail_State_Definitions_Corner_Left`)
     /// or item path. `None` when the name draws nothing.
     pub fn block_model(&self, name: &str) -> Result<Option<Arc<Model>>> {
@@ -876,14 +894,27 @@ impl Hytale {
                                 self.models.push(SceneModel::Inline((*m).clone()));
                                 Some(self.models.len() - 1)
                             }
-                            _ => None,
+                            Ok(None) => None,
+                            Err(e) => {
+                                // A name with no item behind it matches no block. Any other
+                                // error is a block that exists and did not load: keep the reason
+                                if self.hy.names_block_item(&b.name) {
+                                    self.report
+                                        .failed
+                                        .insert(b.name.clone(), (0, format!("{e:#}")));
+                                }
+                                None
+                            }
                         };
                         self.index.insert(b.name.clone(), i);
                         i
                     }
                 };
                 let Some(model) = idx else {
-                    *self.report.unresolved.entry(b.name.clone()).or_default() += 1;
+                    match self.report.failed.get_mut(&b.name) {
+                        Some(f) => f.0 += 1,
+                        None => *self.report.unresolved.entry(b.name.clone()).or_default() += 1,
+                    }
                     return;
                 };
                 match block_transform([b.x, b.y, b.z], self.anchor, b.rotation.unwrap_or(0)) {
